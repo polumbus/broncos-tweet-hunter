@@ -86,6 +86,16 @@ st.markdown("""
     .bo-nix { background-color: #ff4500; color: white; }
     .sean-payton { background-color: #ff8c00; color: white; }
     .broncos { background-color: #fb4f14; color: white; }
+    
+    /* TWEET MEDIA STYLING - SMALLER SIZE */
+    .stImage {
+        margin: 12px 0;
+    }
+    .stImage > img {
+        max-width: 400px !important;
+        width: 100% !important;
+        border-radius: 12px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -113,22 +123,14 @@ def determine_priority(tweet_text):
 
 def is_original_tweet(tweet):
     """Check if tweet is original - ALLOWS QUOTED TWEETS"""
-    # Filter out retweets (text starts with RT @)
     if tweet.text.startswith('RT @'):
         return False
-    
-    # Filter out direct replies (starts with @)
     if tweet.text.startswith('@'):
         return False
-    
-    # Check if it's a reply or retweet (but ALLOW quoted tweets)
     if hasattr(tweet, 'referenced_tweets') and tweet.referenced_tweets:
         for ref in tweet.referenced_tweets:
-            # Block replies and retweets, but ALLOW quoted tweets
             if ref.type in ['replied_to', 'retweeted']:
                 return False
-            # quoted tweets have type 'quoted' - we KEEP these
-    
     return True
 
 def search_viral_tweets(keywords, hours=None):
@@ -209,7 +211,7 @@ def fetch_tweet_media(tweet_id):
         return []
 
 def display_tweet_media(media_list):
-    """Display media inline like Twitter"""
+    """Display media inline - SMALLER SIZE"""
     if not media_list:
         return
     
@@ -217,12 +219,12 @@ def display_tweet_media(media_list):
         try:
             if media.type == 'photo':
                 if hasattr(media, 'url') and media.url:
-                    st.image(media.url, use_column_width=True)
+                    st.image(media.url, width=400)  # Fixed width of 400px
             elif media.type in ['video', 'animated_gif']:
                 if hasattr(media, 'preview_image_url') and media.preview_image_url:
-                    st.image(media.preview_image_url, caption="▶️ Video", use_column_width=True)
+                    st.image(media.preview_image_url, caption="▶️ Video", width=400)  # Fixed width
         except Exception as e:
-            st.error(f"Error displaying media: {str(e)}")
+            pass
 
 def generate_rewrites(original_tweet):
     """Generate all 4 rewrite styles at once"""
@@ -294,20 +296,20 @@ if st.button("🔍 Scan for Viral Broncos & Nuggets Debates", use_container_widt
                             <strong>{tweet['author_name']}</strong> @{tweet['author']}
                         </div>
                         <div class="tweet-text">{tweet['text']}</div>
-                    </div>
                     """, unsafe_allow_html=True)
                     
-                    # Fetch and display media
+                    # Fetch and display media INSIDE card
                     media = fetch_tweet_media(tweet['id'])
                     display_tweet_media(media)
                     
                     st.markdown(f"""
-                    <div class="tweet-metrics">
-                        <span class="metric-high">💬 {tweet['replies']} replies</span>
-                        <span class="metric-high">❤️ {tweet['likes']}</span>
-                        <span class="metric-high">🔄 {tweet['retweets']}</span>
+                        <div class="tweet-metrics">
+                            <span class="metric-high">💬 {tweet['replies']} replies</span>
+                            <span class="metric-high">❤️ {tweet['likes']}</span>
+                            <span class="metric-high">🔄 {tweet['retweets']}</span>
+                        </div>
+                        <a href="{tweet_url}" target="_blank" style="color: #1d9bf0; text-decoration: none;">🔗 View on Twitter →</a>
                     </div>
-                    <a href="{tweet_url}" target="_blank" style="color: #1d9bf0; text-decoration: none;">🔗 View on Twitter →</a>
                     """, unsafe_allow_html=True)
                     
                     with st.spinner("Generating rewrites in your voice..."):
@@ -350,20 +352,19 @@ if st.button("🔍 Scan for Viral Broncos & Nuggets Debates", use_container_widt
                             <strong>{tweet['author_name']}</strong> @{tweet['author']}
                         </div>
                         <div class="tweet-text">{tweet['text']}</div>
-                    </div>
                     """, unsafe_allow_html=True)
                     
-                    # Fetch and display media
                     media = fetch_tweet_media(tweet['id'])
                     display_tweet_media(media)
                     
                     st.markdown(f"""
-                    <div class="tweet-metrics">
-                        <span class="metric-high">💬 {tweet['replies']} replies</span>
-                        <span>❤️ {tweet['likes']}</span>
-                        <span>🔄 {tweet['retweets']}</span>
+                        <div class="tweet-metrics">
+                            <span class="metric-high">💬 {tweet['replies']} replies</span>
+                            <span>❤️ {tweet['likes']}</span>
+                            <span>🔄 {tweet['retweets']}</span>
+                        </div>
+                        <a href="{tweet_url}" target="_blank" style="color: #1d9bf0; text-decoration: none;">🔗 View on Twitter →</a>
                     </div>
-                    <a href="{tweet_url}" target="_blank" style="color: #1d9bf0; text-decoration: none;">🔗 View on Twitter →</a>
                     """, unsafe_allow_html=True)
                     
                     with st.spinner("Generating rewrites in your voice..."):
@@ -406,20 +407,19 @@ if st.button("🔍 Scan for Viral Broncos & Nuggets Debates", use_container_widt
                             <strong>{tweet['author_name']}</strong> @{tweet['author']}
                         </div>
                         <div class="tweet-text">{tweet['text']}</div>
-                    </div>
                     """, unsafe_allow_html=True)
                     
-                    # Fetch and display media
                     media = fetch_tweet_media(tweet['id'])
                     display_tweet_media(media)
                     
                     st.markdown(f"""
-                    <div class="tweet-metrics">
-                        <span class="metric-high">💬 {tweet['replies']} replies</span>
-                        <span>❤️ {tweet['likes']}</span>
-                        <span>🔄 {tweet['retweets']}</span>
+                        <div class="tweet-metrics">
+                            <span class="metric-high">💬 {tweet['replies']} replies</span>
+                            <span>❤️ {tweet['likes']}</span>
+                            <span>🔄 {tweet['retweets']}</span>
+                        </div>
+                        <a href="{tweet_url}" target="_blank" style="color: #1d9bf0; text-decoration: none;">🔗 View on Twitter →</a>
                     </div>
-                    <a href="{tweet_url}" target="_blank" style="color: #1d9bf0; text-decoration: none;">🔗 View on Twitter →</a>
                     """, unsafe_allow_html=True)
                     
                     with st.spinner("Generating rewrites in your voice..."):
