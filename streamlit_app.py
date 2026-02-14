@@ -1,4 +1,4 @@
-```python
+
 import streamlit as st
 import tweepy
 from anthropic import Anthropic
@@ -22,4 +22,5 @@ client_twitter = tweepy.Client(bearer_token=bearer_token, wait_on_rate_limit=Tru
 if st.button("🔍 Scan for Viral Tweets"):
 st.write("Searching...")
 st.write("✅ Tool is working!")
-```
+
+
