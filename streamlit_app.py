@@ -88,7 +88,7 @@ client = Anthropic()
 client_twitter = tweepy.Client(bearer_token=os.environ["TWITTER_BEARER_TOKEN"], wait_on_rate_limit=True)
 
 st.title("🏈 Broncos Tweet Hunter")
-st.caption("Find the most controversial Broncos & Nuggets debates from the last 48 hours")
+st.caption("Find the most controversial Denver Broncos debates from the last 48 hours")
 
 def determine_priority(tweet_text):
     """Determine ranking priority based on content - SMALL tiebreaker only"""
@@ -117,8 +117,16 @@ def is_original_tweet(tweet):
     return True
 
 def search_viral_tweets(keywords, hours=48):
-    """Search for viral tweets - ORIGINAL TWEETS ONLY, PRIORITIZE CONTROVERSY"""
-    query = " OR ".join([f'"{k}"' for k in keywords]) + " -is:retweet -is:reply lang:en"
+    """Search for viral tweets - DENVER BRONCOS ONLY"""
+    # Build query with DENVER BRONCOS specific keywords only
+    query = " OR ".join([f'"{k}"' for k in keywords])
+    
+    # Exclude college/high school teams
+    query += " -\"Western Michigan\" -\"Boise State\" -\"high school\" -\"HS\" -\"prep\" -\"college\" -\"university\""
+    
+    # Exclude retweets and replies
+    query += " -is:retweet -is:reply lang:en"
+    
     start_time = datetime.utcnow() - timedelta(hours=hours)
     
     try:
@@ -146,7 +154,6 @@ def search_viral_tweets(keywords, hours=48):
             priority_info = determine_priority(tweet.text)
             
             # CONTROVERSY RANKING: Replies MASSIVELY weighted (x100000) → Retweets (x100) → Likes (x1)
-            # High reply count = people arguing in comments = controversial
             engagement_score = (
                 (metrics['reply_count'] * 100000) + 
                 (metrics['retweet_count'] * 100) + 
@@ -239,12 +246,21 @@ Keep it under 280 characters. Sound like Tyler - insider perspective, conversati
 
 if st.button("🔍 Scan for Viral Broncos & Nuggets Debates", use_container_width=True):
     with st.spinner("Scanning Twitter for controversial Broncos & Nuggets content..."):
-        # Search Broncos
-        broncos_keywords = ["Denver Broncos", "Sean Payton", "Bo Nix", "Broncos"]
+        # Search DENVER Broncos - specific keywords only
+        broncos_keywords = [
+            "Denver Broncos",
+            "Sean Payton", 
+            "Bo Nix",
+            "Patrick Surtain",
+            "Courtland Sutton",
+            "Javonte Williams",
+            "Empower Field",
+            "Mile High"
+        ]
         broncos_tweets = search_viral_tweets(broncos_keywords)
         
         # Search Nuggets
-        nuggets_keywords = ["Denver Nuggets", "Nikola Jokic", "Nuggets", "Jokic"]
+        nuggets_keywords = ["Denver Nuggets", "Nikola Jokic", "Jokic", "Jamal Murray", "Ball Arena"]
         nuggets_tweets = search_viral_tweets(nuggets_keywords)
         
         # Get top 10 Broncos and top 5 Nuggets
