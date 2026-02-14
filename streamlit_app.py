@@ -73,7 +73,7 @@ client = Anthropic()
 client_twitter = tweepy.Client(bearer_token=os.environ["TWITTER_BEARER_TOKEN"], wait_on_rate_limit=True)
 
 st.title("🏈 Broncos Tweet Hunter")
-st.caption("Find viral Broncos debates from the last 48 hours")
+st.caption("Find viral Broncos & Nuggets debates from the last 48 hours")
 
 def determine_priority(tweet_text):
     """Determine ranking priority based on content"""
@@ -138,7 +138,7 @@ def search_viral_tweets(keywords, hours=48):
             })
         
         scored_tweets.sort(key=lambda x: x['engagement_score'], reverse=True)
-        return scored_tweets[:10]
+        return scored_tweets
     except Exception as e:
         st.error(f"Error: {str(e)}")
         return []
@@ -176,60 +176,123 @@ Keep it under 280 characters. Sound like Tyler - insider perspective, conversati
     
     return rewrites
 
-if st.button("🔍 Scan for Viral Broncos Debates", use_container_width=True):
-    with st.spinner("Scanning Twitter for controversial Broncos content..."):
-        keywords = ["Denver Broncos", "Sean Payton", "Bo Nix", "Broncos"]
-        tweets = search_viral_tweets(keywords)
+if st.button("🔍 Scan for Viral Broncos & Nuggets Debates", use_container_width=True):
+    with st.spinner("Scanning Twitter for controversial Broncos & Nuggets content..."):
+        # Search Broncos
+        broncos_keywords = ["Denver Broncos", "Sean Payton", "Bo Nix", "Broncos"]
+        broncos_tweets = search_viral_tweets(broncos_keywords)
         
-        if tweets:
-            st.success(f"✅ Found {len(tweets)} viral debates! Sorted by controversy (reply count).")
+        # Search Nuggets
+        nuggets_keywords = ["Denver Nuggets", "Nikola Jokic", "Nuggets", "Jokic"]
+        nuggets_tweets = search_viral_tweets(nuggets_keywords)
+        
+        # Get top 10 Broncos and top 5 Nuggets
+        top_broncos = broncos_tweets[:10]
+        top_nuggets = nuggets_tweets[:5]
+        
+        if top_broncos or top_nuggets:
+            st.success(f"✅ Found {len(top_broncos)} Broncos + {len(top_nuggets)} Nuggets debates!")
             
-            for tweet in tweets:
-                tweet_url = f"https://twitter.com/{tweet['author']}/status/{tweet['id']}"
-                
-                st.markdown(f"""
-                <div class="tweet-card">
-                    <div class="tweet-header">
-                        <span class="priority-badge {tweet['priority']['color']}">{tweet['priority']['label']}</span>
-                        <strong>{tweet['author_name']}</strong> @{tweet['author']}
+            # Show Broncos tweets
+            if top_broncos:
+                st.markdown("### 🏈 BRONCOS TWEETS")
+                for tweet in top_broncos:
+                    tweet_url = f"https://twitter.com/{tweet['author']}/status/{tweet['id']}"
+                    
+                    st.markdown(f"""
+                    <div class="tweet-card">
+                        <div class="tweet-header">
+                            <span class="priority-badge {tweet['priority']['color']}">{tweet['priority']['label']}</span>
+                            <strong>{tweet['author_name']}</strong> @{tweet['author']}
+                        </div>
+                        <div class="tweet-text">{tweet['text']}</div>
+                        <div class="tweet-metrics">
+                            <span class="metric-high">💬 {tweet['replies']} replies</span>
+                            <span>❤️ {tweet['likes']}</span>
+                            <span>🔄 {tweet['retweets']}</span>
+                        </div>
+                        <a href="{tweet_url}" target="_blank" style="color: #1d9bf0; text-decoration: none;">🔗 View on Twitter →</a>
                     </div>
-                    <div class="tweet-text">{tweet['text']}</div>
-                    <div class="tweet-metrics">
-                        <span class="metric-high">💬 {tweet['replies']} replies</span>
-                        <span>❤️ {tweet['likes']}</span>
-                        <span>🔄 {tweet['retweets']}</span>
+                    """, unsafe_allow_html=True)
+                    
+                    if tweet['media']:
+                        st.markdown("**📸 Media:**")
+                        for media in tweet['media']:
+                            try:
+                                if media.type == 'photo' and hasattr(media, 'url'):
+                                    st.image(media.url, use_container_width=True)
+                                elif media.type in ['video', 'animated_gif']:
+                                    if hasattr(media, 'preview_image_url'):
+                                        st.image(media.preview_image_url, caption="Video preview (click Twitter link to watch)", use_container_width=True)
+                            except:
+                                pass
+                    
+                    with st.spinner("Generating rewrites in your voice..."):
+                        rewrites = generate_rewrites(tweet['text'])
+                    
+                    st.markdown("**✍️ Your Rewrites (Pick One to Edit & Post):**")
+                    
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.markdown(f"<div class='rewrite-preview'><strong>Default:</strong><br>{rewrites['Default']}</div>", unsafe_allow_html=True)
+                        st.markdown(f"<div class='rewrite-preview'><strong>Analytical:</strong><br>{rewrites['Analytical']}</div>", unsafe_allow_html=True)
+                    
+                    with col2:
+                        st.markdown(f"<div class='rewrite-preview'><strong>Controversial:</strong><br>{rewrites['Controversial']}</div>", unsafe_allow_html=True)
+                        st.markdown(f"<div class='rewrite-preview'><strong>Personal:</strong><br>{rewrites['Personal']}</div>", unsafe_allow_html=True)
+                    
+                    st.markdown("---")
+            
+            # Show Nuggets tweets
+            if top_nuggets:
+                st.markdown("### 🏀 NUGGETS TWEETS")
+                for tweet in top_nuggets:
+                    tweet_url = f"https://twitter.com/{tweet['author']}/status/{tweet['id']}"
+                    
+                    st.markdown(f"""
+                    <div class="tweet-card">
+                        <div class="tweet-header">
+                            <span class="priority-badge" style="background-color: #fdb927; color: #00285e;">🏀 NUGGETS</span>
+                            <strong>{tweet['author_name']}</strong> @{tweet['author']}
+                        </div>
+                        <div class="tweet-text">{tweet['text']}</div>
+                        <div class="tweet-metrics">
+                            <span class="metric-high">💬 {tweet['replies']} replies</span>
+                            <span>❤️ {tweet['likes']}</span>
+                            <span>🔄 {tweet['retweets']}</span>
+                        </div>
+                        <a href="{tweet_url}" target="_blank" style="color: #1d9bf0; text-decoration: none;">🔗 View on Twitter →</a>
                     </div>
-                    <a href="{tweet_url}" target="_blank" style="color: #1d9bf0; text-decoration: none;">🔗 View on Twitter →</a>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                if tweet['media']:
-                    st.markdown("**📸 Media:**")
-                    for media in tweet['media']:
-                        try:
-                            if media.type == 'photo' and hasattr(media, 'url'):
-                                st.image(media.url, use_container_width=True)
-                            elif media.type in ['video', 'animated_gif']:
-                                if hasattr(media, 'preview_image_url'):
-                                    st.image(media.preview_image_url, caption="Video preview (click Twitter link to watch)", use_container_width=True)
-                        except:
-                            pass
-                
-                with st.spinner("Generating rewrites in your voice..."):
-                    rewrites = generate_rewrites(tweet['text'])
-                
-                st.markdown("**✍️ Your Rewrites (Pick One to Edit & Post):**")
-                
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    st.markdown(f"<div class='rewrite-preview'><strong>Default:</strong><br>{rewrites['Default']}</div>", unsafe_allow_html=True)
-                    st.markdown(f"<div class='rewrite-preview'><strong>Analytical:</strong><br>{rewrites['Analytical']}</div>", unsafe_allow_html=True)
-                
-                with col2:
-                    st.markdown(f"<div class='rewrite-preview'><strong>Controversial:</strong><br>{rewrites['Controversial']}</div>", unsafe_allow_html=True)
-                    st.markdown(f"<div class='rewrite-preview'><strong>Personal:</strong><br>{rewrites['Personal']}</div>", unsafe_allow_html=True)
-                
-                st.markdown("---")
+                    """, unsafe_allow_html=True)
+                    
+                    if tweet['media']:
+                        st.markdown("**📸 Media:**")
+                        for media in tweet['media']:
+                            try:
+                                if media.type == 'photo' and hasattr(media, 'url'):
+                                    st.image(media.url, use_container_width=True)
+                                elif media.type in ['video', 'animated_gif']:
+                                    if hasattr(media, 'preview_image_url'):
+                                        st.image(media.preview_image_url, caption="Video preview (click Twitter link to watch)", use_container_width=True)
+                            except:
+                                pass
+                    
+                    with st.spinner("Generating rewrites in your voice..."):
+                        rewrites = generate_rewrites(tweet['text'])
+                    
+                    st.markdown("**✍️ Your Rewrites (Pick One to Edit & Post):**")
+                    
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.markdown(f"<div class='rewrite-preview'><strong>Default:</strong><br>{rewrites['Default']}</div>", unsafe_allow_html=True)
+                        st.markdown(f"<div class='rewrite-preview'><strong>Analytical:</strong><br>{rewrites['Analytical']}</div>", unsafe_allow_html=True)
+                    
+                    with col2:
+                        st.markdown(f"<div class='rewrite-preview'><strong>Controversial:</strong><br>{rewrites['Controversial']}</div>", unsafe_allow_html=True)
+                        st.markdown(f"<div class='rewrite-preview'><strong>Personal:</strong><br>{rewrites['Personal']}</div>", unsafe_allow_html=True)
+                    
+                    st.markdown("---")
         else:
             st.warning("No tweets found. Try again in a few moments!")
