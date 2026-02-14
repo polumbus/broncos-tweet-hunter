@@ -41,6 +41,11 @@ st.markdown("""
         color: #e7e9ea;
         margin-bottom: 12px;
     }
+    .tweet-media {
+        margin: 12px 0;
+        border-radius: 16px;
+        overflow: hidden;
+    }
     .tweet-metrics {
         display: flex;
         gap: 20px;
@@ -101,7 +106,7 @@ def determine_priority(tweet_text):
         return {"rank": 3, "label": "🏈 BRONCOS", "color": "broncos", "priority": 100000}
 
 def search_viral_tweets(keywords, hours=48):
-    """Search for viral tweets with media"""
+    """Search for viral tweets"""
     query = " OR ".join([f'"{k}"' for k in keywords]) + " -is:retweet lang:en"
     start_time = datetime.utcnow() - timedelta(hours=hours)
     
@@ -111,19 +116,14 @@ def search_viral_tweets(keywords, hours=48):
             max_results=100,
             start_time=start_time,
             tweet_fields=['public_metrics', 'created_at'],
-            expansions=['author_id', 'attachments.media_keys'],
-            user_fields=['username', 'name'],
-            media_fields=['url', 'preview_image_url', 'type']
+            expansions=['author_id'],
+            user_fields=['username', 'name']
         )
         
         if not tweets.data:
             return []
         
         users = {user.id: user for user in tweets.includes['users']}
-        media_dict = {}
-        if tweets.includes and 'media' in tweets.includes:
-            media_dict = {media.media_key: media for media in tweets.includes['media']}
-        
         scored_tweets = []
         
         for tweet in tweets.data:
@@ -140,12 +140,6 @@ def search_viral_tweets(keywords, hours=48):
             
             user = users.get(tweet.author_id)
             
-            tweet_media = []
-            if hasattr(tweet, 'attachments') and tweet.attachments and 'media_keys' in tweet.attachments:
-                for media_key in tweet.attachments['media_keys']:
-                    if media_key in media_dict:
-                        tweet_media.append(media_dict[media_key])
-            
             scored_tweets.append({
                 'id': tweet.id,
                 'text': tweet.text,
@@ -156,8 +150,7 @@ def search_viral_tweets(keywords, hours=48):
                 'retweets': metrics['retweet_count'],
                 'replies': metrics['reply_count'],
                 'engagement_score': engagement_score,
-                'priority': priority_info,
-                'media': tweet_media
+                'priority': priority_info
             })
         
         scored_tweets.sort(key=lambda x: x['engagement_score'], reverse=True)
@@ -165,6 +158,41 @@ def search_viral_tweets(keywords, hours=48):
     except Exception as e:
         st.error(f"Error: {str(e)}")
         return []
+
+def fetch_tweet_media(tweet_id):
+    """Fetch media for a specific tweet"""
+    try:
+        tweet_data = client_twitter.get_tweet(
+            tweet_id,
+            expansions=['attachments.media_keys'],
+            media_fields=['url', 'preview_image_url', 'type', 'variants']
+        )
+        
+        if tweet_data.includes and 'media' in tweet_data.includes:
+            return tweet_data.includes['media']
+        return []
+    except:
+        return []
+
+def display_tweet_media(media_list):
+    """Display media inline like Twitter"""
+    if not media_list:
+        return
+    
+    for media in media_list:
+        try:
+            if media.type == 'photo':
+                if hasattr(media, 'url') and media.url:
+                    st.markdown('<div class="tweet-media">', unsafe_allow_html=True)
+                    st.image(media.url, use_container_width=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
+            elif media.type in ['video', 'animated_gif']:
+                if hasattr(media, 'preview_image_url') and media.preview_image_url:
+                    st.markdown('<div class="tweet-media">', unsafe_allow_html=True)
+                    st.image(media.preview_image_url, use_container_width=True, caption="▶️ Video (click Twitter link to watch)")
+                    st.markdown('</div>', unsafe_allow_html=True)
+        except:
+            pass
 
 def generate_rewrites(original_tweet):
     """Generate all 4 rewrite styles at once"""
@@ -230,26 +258,21 @@ if st.button("🔍 Scan for Viral Broncos & Nuggets Debates", use_container_widt
                             <strong>{tweet['author_name']}</strong> @{tweet['author']}
                         </div>
                         <div class="tweet-text">{tweet['text']}</div>
-                        <div class="tweet-metrics">
-                            <span class="metric-high">💬 {tweet['replies']} replies</span>
-                            <span class="metric-high">❤️ {tweet['likes']}</span>
-                            <span class="metric-high">🔄 {tweet['retweets']}</span>
-                        </div>
-                        <a href="{tweet_url}" target="_blank" style="color: #1d9bf0; text-decoration: none;">🔗 View on Twitter →</a>
                     </div>
                     """, unsafe_allow_html=True)
                     
-                    if tweet['media']:
-                        st.markdown("**📸 Media:**")
-                        for media in tweet['media']:
-                            try:
-                                if media.type == 'photo' and hasattr(media, 'url'):
-                                    st.image(media.url, use_container_width=True)
-                                elif media.type in ['video', 'animated_gif']:
-                                    if hasattr(media, 'preview_image_url'):
-                                        st.image(media.preview_image_url, caption="Video preview (click Twitter link to watch)", use_container_width=True)
-                            except:
-                                pass
+                    # Fetch and display media inline
+                    media = fetch_tweet_media(tweet['id'])
+                    display_tweet_media(media)
+                    
+                    st.markdown(f"""
+                    <div class="tweet-metrics">
+                        <span class="metric-high">💬 {tweet['replies']} replies</span>
+                        <span class="metric-high">❤️ {tweet['likes']}</span>
+                        <span class="metric-high">🔄 {tweet['retweets']}</span>
+                    </div>
+                    <a href="{tweet_url}" target="_blank" style="color: #1d9bf0; text-decoration: none;">🔗 View on Twitter →</a>
+                    """, unsafe_allow_html=True)
                     
                     with st.spinner("Generating rewrites in your voice..."):
                         rewrites = generate_rewrites(tweet['text'])
@@ -291,26 +314,21 @@ if st.button("🔍 Scan for Viral Broncos & Nuggets Debates", use_container_widt
                             <strong>{tweet['author_name']}</strong> @{tweet['author']}
                         </div>
                         <div class="tweet-text">{tweet['text']}</div>
-                        <div class="tweet-metrics">
-                            <span class="metric-high">💬 {tweet['replies']} replies</span>
-                            <span>❤️ {tweet['likes']}</span>
-                            <span>🔄 {tweet['retweets']}</span>
-                        </div>
-                        <a href="{tweet_url}" target="_blank" style="color: #1d9bf0; text-decoration: none;">🔗 View on Twitter →</a>
                     </div>
                     """, unsafe_allow_html=True)
                     
-                    if tweet['media']:
-                        st.markdown("**📸 Media:**")
-                        for media in tweet['media']:
-                            try:
-                                if media.type == 'photo' and hasattr(media, 'url'):
-                                    st.image(media.url, use_container_width=True)
-                                elif media.type in ['video', 'animated_gif']:
-                                    if hasattr(media, 'preview_image_url'):
-                                        st.image(media.preview_image_url, caption="Video preview (click Twitter link to watch)", use_container_width=True)
-                            except:
-                                pass
+                    # Fetch and display media inline
+                    media = fetch_tweet_media(tweet['id'])
+                    display_tweet_media(media)
+                    
+                    st.markdown(f"""
+                    <div class="tweet-metrics">
+                        <span class="metric-high">💬 {tweet['replies']} replies</span>
+                        <span>❤️ {tweet['likes']}</span>
+                        <span>🔄 {tweet['retweets']}</span>
+                    </div>
+                    <a href="{tweet_url}" target="_blank" style="color: #1d9bf0; text-decoration: none;">🔗 View on Twitter →</a>
+                    """, unsafe_allow_html=True)
                     
                     with st.spinner("Generating rewrites in your voice..."):
                         rewrites = generate_rewrites(tweet['text'])
@@ -352,26 +370,21 @@ if st.button("🔍 Scan for Viral Broncos & Nuggets Debates", use_container_widt
                             <strong>{tweet['author_name']}</strong> @{tweet['author']}
                         </div>
                         <div class="tweet-text">{tweet['text']}</div>
-                        <div class="tweet-metrics">
-                            <span class="metric-high">💬 {tweet['replies']} replies</span>
-                            <span>❤️ {tweet['likes']}</span>
-                            <span>🔄 {tweet['retweets']}</span>
-                        </div>
-                        <a href="{tweet_url}" target="_blank" style="color: #1d9bf0; text-decoration: none;">🔗 View on Twitter →</a>
                     </div>
                     """, unsafe_allow_html=True)
                     
-                    if tweet['media']:
-                        st.markdown("**📸 Media:**")
-                        for media in tweet['media']:
-                            try:
-                                if media.type == 'photo' and hasattr(media, 'url'):
-                                    st.image(media.url, use_container_width=True)
-                                elif media.type in ['video', 'animated_gif']:
-                                    if hasattr(media, 'preview_image_url'):
-                                        st.image(media.preview_image_url, caption="Video preview (click Twitter link to watch)", use_container_width=True)
-                            except:
-                                pass
+                    # Fetch and display media inline
+                    media = fetch_tweet_media(tweet['id'])
+                    display_tweet_media(media)
+                    
+                    st.markdown(f"""
+                    <div class="tweet-metrics">
+                        <span class="metric-high">💬 {tweet['replies']} replies</span>
+                        <span>❤️ {tweet['likes']}</span>
+                        <span>🔄 {tweet['retweets']}</span>
+                    </div>
+                    <a href="{tweet_url}" target="_blank" style="color: #1d9bf0; text-decoration: none;">🔗 View on Twitter →</a>
+                    """, unsafe_allow_html=True)
                     
                     with st.spinner("Generating rewrites in your voice..."):
                         rewrites = generate_rewrites(tweet['text'])
