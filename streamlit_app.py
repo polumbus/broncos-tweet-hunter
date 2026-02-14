@@ -136,8 +136,10 @@ col3.metric("🚀 Ready to post", "Instantly")
 st.markdown("---")
 
 # RANKING SYSTEM
-def get_ranking(text):
-"""Determine ranking priority based on content"""
+def determine_priority(tweet_text):
+    """Determine ranking priority based on content"""
+    # Function body here
+    pass
 text_lower = text.lower()
 
 bo_nix_keywords = ["bo nix", "bo nicks", "nix", "quarterback", "qb"]
@@ -320,3 +322,4 @@ st.info(f"📅 Ready to schedule: {edited[:50]}...")
 st.markdown("---")
 else:
 st.warning("No tweets found. Try again!")
+
