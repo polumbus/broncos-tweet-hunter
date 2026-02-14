@@ -9,6 +9,7 @@ import os
 # ========================================
 TESTING_MODE = True  # Set to False when ready for full scanning
 MAX_TWEETS = 20 if TESTING_MODE else 100  # 20 tweets in testing, 100 in production
+HOURS_BACK = 36  # Scan last 36 hours
 # ========================================
 
 st.set_page_config(page_title="Broncos Tweet Hunter", layout="wide", initial_sidebar_state="collapsed")
@@ -98,7 +99,7 @@ st.title("🏈 Broncos Tweet Hunter")
 if TESTING_MODE:
     st.caption(f"⚠️ TESTING MODE: Fetching only {MAX_TWEETS} tweets to save credits")
 else:
-    st.caption("Find the most controversial Denver Broncos debates from the last 48 hours")
+    st.caption(f"Find the most controversial Denver Broncos debates from the last {HOURS_BACK} hours")
 
 def determine_priority(tweet_text):
     """Determine ranking priority based on content - SMALL tiebreaker only"""
@@ -111,17 +112,30 @@ def determine_priority(tweet_text):
         return {"rank": 3, "label": "🏈 BRONCOS", "color": "broncos", "priority": 10}
 
 def is_original_tweet(tweet):
-    """Check if tweet is truly original (not a reply or retweet)"""
+    """Check if tweet is original - ALLOWS QUOTED TWEETS"""
+    # Filter out retweets (text starts with RT @)
     if tweet.text.startswith('RT @'):
         return False
+    
+    # Filter out direct replies (starts with @)
     if tweet.text.startswith('@'):
         return False
+    
+    # Check if it's a reply or retweet (but ALLOW quoted tweets)
     if hasattr(tweet, 'referenced_tweets') and tweet.referenced_tweets:
-        return False
+        for ref in tweet.referenced_tweets:
+            # Block replies and retweets, but ALLOW quoted tweets
+            if ref.type in ['replied_to', 'retweeted']:
+                return False
+            # quoted tweets have type 'quoted' - we KEEP these
+    
     return True
 
-def search_viral_tweets(keywords, hours=48):
+def search_viral_tweets(keywords, hours=None):
     """Search for viral tweets - DENVER BRONCOS ONLY"""
+    if hours is None:
+        hours = HOURS_BACK
+    
     query = " OR ".join([f'"{k}"' for k in keywords])
     query += " -\"Western Michigan\" -\"Boise State\" -\"high school\" -\"HS\" -\"prep\" -\"college\" -\"university\""
     query += " -is:retweet -is:reply lang:en"
@@ -195,7 +209,7 @@ def fetch_tweet_media(tweet_id):
         return []
 
 def display_tweet_media(media_list):
-    """Display media inline like Twitter - FIXED PARAMETER"""
+    """Display media inline like Twitter"""
     if not media_list:
         return
     
@@ -203,10 +217,10 @@ def display_tweet_media(media_list):
         try:
             if media.type == 'photo':
                 if hasattr(media, 'url') and media.url:
-                    st.image(media.url, use_column_width=True)  # FIXED: use_column_width instead of use_container_width
+                    st.image(media.url, use_column_width=True)
             elif media.type in ['video', 'animated_gif']:
                 if hasattr(media, 'preview_image_url') and media.preview_image_url:
-                    st.image(media.preview_image_url, caption="▶️ Video", use_column_width=True)  # FIXED
+                    st.image(media.preview_image_url, caption="▶️ Video", use_column_width=True)
         except Exception as e:
             st.error(f"Error displaying media: {str(e)}")
 
