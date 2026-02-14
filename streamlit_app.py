@@ -164,7 +164,8 @@ Original tweet: "{original_tweet}"
 Keep it under 280 characters. Sound like Tyler - insider perspective, conversational, punchy."""
                 }]
             )
-            rewrites[style_name] = message.content[0].text
+            except Exception as e:
+    rewrites[style_name] = f"ERROR: {str(e)}"
         except:
             rewrites[style_name] = f"Error generating {style_name} rewrite"
     
@@ -215,3 +216,4 @@ if st.button("🔍 Scan for Viral Broncos Debates", use_container_width=True):
                 st.markdown("---")
         else:
             st.warning("No tweets found. Try again in a few moments!")
+
