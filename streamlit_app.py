@@ -88,7 +88,7 @@ client = Anthropic()
 client_twitter = tweepy.Client(bearer_token=os.environ["TWITTER_BEARER_TOKEN"], wait_on_rate_limit=True)
 
 st.title("🏈 Broncos Tweet Hunter")
-st.caption("Find viral Broncos & Nuggets debates from the last 48 hours")
+st.caption("Find the most controversial Broncos & Nuggets debates from the last 48 hours")
 
 def determine_priority(tweet_text):
     """Determine ranking priority based on content - SMALL tiebreaker only"""
@@ -117,7 +117,7 @@ def is_original_tweet(tweet):
     return True
 
 def search_viral_tweets(keywords, hours=48):
-    """Search for viral tweets - ORIGINAL TWEETS ONLY"""
+    """Search for viral tweets - ORIGINAL TWEETS ONLY, PRIORITIZE CONTROVERSY"""
     query = " OR ".join([f'"{k}"' for k in keywords]) + " -is:retweet -is:reply lang:en"
     start_time = datetime.utcnow() - timedelta(hours=hours)
     
@@ -145,9 +145,10 @@ def search_viral_tweets(keywords, hours=48):
             metrics = tweet.public_metrics
             priority_info = determine_priority(tweet.text)
             
-            # RANKING: Replies (x10000) → Retweets (x100) → Likes (x1) → Priority (tiny tiebreaker)
+            # CONTROVERSY RANKING: Replies MASSIVELY weighted (x100000) → Retweets (x100) → Likes (x1)
+            # High reply count = people arguing in comments = controversial
             engagement_score = (
-                (metrics['reply_count'] * 10000) + 
+                (metrics['reply_count'] * 100000) + 
                 (metrics['retweet_count'] * 100) + 
                 metrics['like_count'] + 
                 priority_info['priority']
