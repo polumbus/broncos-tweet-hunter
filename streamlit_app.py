@@ -114,7 +114,15 @@ def search_viral_tweets(keywords, hours=48):
         for tweet in tweets.data:
             metrics = tweet.public_metrics
             priority_info = determine_priority(tweet.text)
-            engagement_score = (metrics['reply_count'] * 1000) + priority_info['priority']
+            
+            # RANKING: Replies (x10000) → Retweets (x100) → Likes (x1)
+            engagement_score = (
+                (metrics['reply_count'] * 10000) + 
+                (metrics['retweet_count'] * 100) + 
+                metrics['like_count'] + 
+                priority_info['priority']
+            )
+            
             user = users.get(tweet.author_id)
             
             tweet_media = []
