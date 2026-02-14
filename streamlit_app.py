@@ -25,6 +25,11 @@ st.markdown("""
         padding: 16px;
         margin: 12px 0;
     }
+    .top-pick {
+        background-color: #1a2332;
+        border: 2px solid #1d9bf0;
+        box-shadow: 0 0 20px rgba(29, 155, 240, 0.3);
+    }
     .tweet-header {
         display: flex;
         align-items: center;
@@ -59,6 +64,16 @@ st.markdown("""
         font-size: 12px;
         font-weight: bold;
         margin-right: 8px;
+    }
+    .top-pick-badge {
+        background-color: #1d9bf0;
+        color: white;
+        padding: 6px 14px;
+        border-radius: 20px;
+        font-size: 13px;
+        font-weight: bold;
+        margin-bottom: 8px;
+        display: inline-block;
     }
     .bo-nix { background-color: #ff4500; color: white; }
     .sean-payton { background-color: #ff8c00; color: white; }
@@ -201,10 +216,62 @@ if st.button("🔍 Scan for Viral Broncos & Nuggets Debates", use_container_widt
         if top_broncos or top_nuggets:
             st.success(f"✅ Found {len(top_broncos)} Broncos + {len(top_nuggets)} Nuggets debates!")
             
-            # Show Broncos tweets
-            if top_broncos:
-                st.markdown("### 🏈 BRONCOS TWEETS")
-                for tweet in top_broncos:
+            # Show TOP 3 Broncos picks
+            if len(top_broncos) >= 3:
+                st.markdown("### ⭐ TOP 3 BRONCOS PICKS")
+                for i, tweet in enumerate(top_broncos[:3]):
+                    tweet_url = f"https://twitter.com/{tweet['author']}/status/{tweet['id']}"
+                    
+                    st.markdown(f"""
+                    <div class="tweet-card top-pick">
+                        <span class="top-pick-badge">⭐ TOP PICK #{i+1}</span>
+                        <div class="tweet-header">
+                            <span class="priority-badge {tweet['priority']['color']}">{tweet['priority']['label']}</span>
+                            <strong>{tweet['author_name']}</strong> @{tweet['author']}
+                        </div>
+                        <div class="tweet-text">{tweet['text']}</div>
+                        <div class="tweet-metrics">
+                            <span class="metric-high">💬 {tweet['replies']} replies</span>
+                            <span class="metric-high">❤️ {tweet['likes']}</span>
+                            <span class="metric-high">🔄 {tweet['retweets']}</span>
+                        </div>
+                        <a href="{tweet_url}" target="_blank" style="color: #1d9bf0; text-decoration: none;">🔗 View on Twitter →</a>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    if tweet['media']:
+                        st.markdown("**📸 Media:**")
+                        for media in tweet['media']:
+                            try:
+                                if media.type == 'photo' and hasattr(media, 'url'):
+                                    st.image(media.url, use_container_width=True)
+                                elif media.type in ['video', 'animated_gif']:
+                                    if hasattr(media, 'preview_image_url'):
+                                        st.image(media.preview_image_url, caption="Video preview (click Twitter link to watch)", use_container_width=True)
+                            except:
+                                pass
+                    
+                    with st.spinner("Generating rewrites in your voice..."):
+                        rewrites = generate_rewrites(tweet['text'])
+                    
+                    st.markdown("**✍️ Your Rewrites (Pick One to Edit & Post):**")
+                    
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.markdown(f"<div class='rewrite-preview'><strong>Default:</strong><br>{rewrites['Default']}</div>", unsafe_allow_html=True)
+                        st.markdown(f"<div class='rewrite-preview'><strong>Analytical:</strong><br>{rewrites['Analytical']}</div>", unsafe_allow_html=True)
+                    
+                    with col2:
+                        st.markdown(f"<div class='rewrite-preview'><strong>Controversial:</strong><br>{rewrites['Controversial']}</div>", unsafe_allow_html=True)
+                        st.markdown(f"<div class='rewrite-preview'><strong>Personal:</strong><br>{rewrites['Personal']}</div>", unsafe_allow_html=True)
+                    
+                    st.markdown("---")
+            
+            # Show remaining Broncos tweets
+            if len(top_broncos) > 3:
+                st.markdown("### 🏈 OTHER BRONCOS TWEETS")
+                for tweet in top_broncos[3:]:
                     tweet_url = f"https://twitter.com/{tweet['author']}/status/{tweet['id']}"
                     
                     st.markdown(f"""
