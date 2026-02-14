@@ -101,8 +101,8 @@ def determine_priority(tweet_text):
         return {"rank": 3, "label": "🏈 BRONCOS", "color": "broncos", "priority": 10}
 
 def search_viral_tweets(keywords, hours=48):
-    """Search for viral tweets"""
-    query = " OR ".join([f'"{k}"' for k in keywords]) + " -is:retweet lang:en"
+    """Search for viral tweets - ORIGINAL TWEETS ONLY"""
+    query = " OR ".join([f'"{k}"' for k in keywords]) + " -is:retweet -is:reply lang:en"
     start_time = datetime.utcnow() - timedelta(hours=hours)
     
     try:
