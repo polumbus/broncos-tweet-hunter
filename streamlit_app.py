@@ -8,8 +8,8 @@ st.set_page_config(page_title="Broncos Tweet Hunter", layout="wide")
 st.title("🏈 Broncos Tweet Hunter")
 st.write("Find viral Broncos & Nuggets content from the last 48 hours")
 
-bearer_token = st.secrets("TWITTER_BEARER_TOKEN")
-api_key = st.secrets("ANTHROPIC_API_KEY")
+bearer_token = st.secrets["TWITTER_BEARER_TOKEN"]
+api_key = st.secrets["ANTHROPIC_API_KEY"]
 
 if not bearer_token or not api_key:
     st.error("API keys missing! Add them in Streamlit Secrets.")
@@ -66,6 +66,7 @@ if st.button("🔍 Scan for Viral Tweets"):
             
     except Exception as e:
         st.error(f"Error: {str(e)}")
+
 
 
 
