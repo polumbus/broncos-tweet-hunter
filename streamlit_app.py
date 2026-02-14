@@ -4,6 +4,13 @@ from anthropic import Anthropic
 from datetime import datetime, timedelta
 import os
 
+# ========================================
+# TESTING MODE - CHANGE THIS
+# ========================================
+TESTING_MODE = True  # Set to False when ready for full scanning
+MAX_TWEETS = 20 if TESTING_MODE else 100  # 20 tweets in testing, 100 in production
+# ========================================
+
 st.set_page_config(page_title="Broncos Tweet Hunter", layout="wide", initial_sidebar_state="collapsed")
 
 st.markdown("""
@@ -88,7 +95,10 @@ client = Anthropic()
 client_twitter = tweepy.Client(bearer_token=os.environ["TWITTER_BEARER_TOKEN"], wait_on_rate_limit=True)
 
 st.title("🏈 Broncos Tweet Hunter")
-st.caption("Find the most controversial Denver Broncos debates from the last 48 hours")
+if TESTING_MODE:
+    st.caption(f"⚠️ TESTING MODE: Fetching only {MAX_TWEETS} tweets to save credits")
+else:
+    st.caption("Find the most controversial Denver Broncos debates from the last 48 hours")
 
 def determine_priority(tweet_text):
     """Determine ranking priority based on content - SMALL tiebreaker only"""
@@ -132,7 +142,7 @@ def search_viral_tweets(keywords, hours=48):
     try:
         tweets = client_twitter.search_recent_tweets(
             query=query,
-            max_results=100,
+            max_results=MAX_TWEETS,  # Uses TESTING_MODE setting
             start_time=start_time,
             tweet_fields=['public_metrics', 'created_at', 'referenced_tweets'],
             expansions=['author_id'],
