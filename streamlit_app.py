@@ -100,6 +100,22 @@ def determine_priority(tweet_text):
     else:
         return {"rank": 3, "label": "🏈 BRONCOS", "color": "broncos", "priority": 10}
 
+def is_original_tweet(tweet):
+    """Check if tweet is truly original (not a reply or retweet)"""
+    # Filter out retweets (text starts with RT @)
+    if tweet.text.startswith('RT @'):
+        return False
+    
+    # Filter out replies (starts with @)
+    if tweet.text.startswith('@'):
+        return False
+    
+    # Filter out tweets with referenced tweets (replies, quotes, retweets)
+    if hasattr(tweet, 'referenced_tweets') and tweet.referenced_tweets:
+        return False
+    
+    return True
+
 def search_viral_tweets(keywords, hours=48):
     """Search for viral tweets - ORIGINAL TWEETS ONLY"""
     query = " OR ".join([f'"{k}"' for k in keywords]) + " -is:retweet -is:reply lang:en"
@@ -110,7 +126,7 @@ def search_viral_tweets(keywords, hours=48):
             query=query,
             max_results=100,
             start_time=start_time,
-            tweet_fields=['public_metrics', 'created_at'],
+            tweet_fields=['public_metrics', 'created_at', 'referenced_tweets'],
             expansions=['author_id'],
             user_fields=['username', 'name']
         )
@@ -122,6 +138,10 @@ def search_viral_tweets(keywords, hours=48):
         scored_tweets = []
         
         for tweet in tweets.data:
+            # EXTRA FILTER: Only keep truly original tweets
+            if not is_original_tweet(tweet):
+                continue
+            
             metrics = tweet.public_metrics
             priority_info = determine_priority(tweet.text)
             
