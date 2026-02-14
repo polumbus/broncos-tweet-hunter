@@ -1,3 +1,200 @@
+iimport streamlit as st
+import tweepy
+from anthropic import Anthropic
+from datetime import datetime, timedelta
+import os
+
+st.set_page_config(page_title="Broncos Tweet Hunter", layout="wide", initial_sidebar_state="collapsed")
+
+st.markdown("""
+<style>
+    .main { background-color: #000000; color: #e7e9ea; }
+    .stButton>button { 
+        background-color: #1d9bf0; 
+        color: white; 
+        border-radius: 20px;
+        border: none;
+        font-weight: bold;
+        padding: 12px 24px;
+        font-size: 16px;
+    }
+    .tweet-card {
+        background-color: #16181c;
+        border: 1px solid #2f3336;
+        border-radius: 16px;
+        padding: 16px;
+        margin: 12px 0;
+    }
+    .top-pick {
+        background-color: #1a2332;
+        border: 2px solid #1d9bf0;
+        box-shadow: 0 0 20px rgba(29, 155, 240, 0.3);
+    }
+    .tweet-header {
+        display: flex;
+        align-items: center;
+        margin-bottom: 12px;
+    }
+    .tweet-text {
+        font-size: 15px;
+        line-height: 20px;
+        color: #e7e9ea;
+        margin-bottom: 12px;
+    }
+    .tweet-metrics {
+        display: flex;
+        gap: 20px;
+        color: #71767b;
+        font-size: 13px;
+        margin: 12px 0;
+    }
+    .metric-high { color: #f91880; font-weight: bold; }
+    .rewrite-preview {
+        background-color: #1c1f23;
+        border-left: 3px solid #1d9bf0;
+        padding: 12px;
+        margin: 8px 0;
+        border-radius: 8px;
+        font-size: 14px;
+    }
+    .priority-badge {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 12px;
+        font-size: 12px;
+        font-weight: bold;
+        margin-right: 8px;
+    }
+    .top-pick-badge {
+        background-color: #1d9bf0;
+        color: white;
+        padding: 6px 14px;
+        border-radius: 20px;
+        font-size: 13px;
+        font-weight: bold;
+        margin-bottom: 8px;
+        display: inline-block;
+    }
+    .bo-nix { background-color: #ff4500; color: white; }
+    .sean-payton { background-color: #ff8c00; color: white; }
+    .broncos { background-color: #fb4f14; color: white; }
+</style>
+""", unsafe_allow_html=True)
+
+os.environ["TWITTER_BEARER_TOKEN"] = st.secrets["TWITTER_BEARER_TOKEN"]
+os.environ["ANTHROPIC_API_KEY"] = st.secrets["ANTHROPIC_API_KEY"]
+
+client = Anthropic()
+client_twitter = tweepy.Client(bearer_token=os.environ["TWITTER_BEARER_TOKEN"], wait_on_rate_limit=True)
+
+st.title("🏈 Broncos Tweet Hunter")
+st.caption("Find absolute viral bangers from the last 48 hours")
+
+def determine_priority(tweet_text):
+    """Determine ranking priority based on content"""
+    text_lower = tweet_text.lower()
+    if "bo nix" in text_lower or "bo mix" in text_lower:
+        return {"rank": 1, "label": "🔥 BO NIX", "color": "bo-nix", "priority": 1000000}
+    elif "sean payton" in text_lower or "payton" in text_lower:
+        return {"rank": 2, "label": "⚡ SEAN PAYTON", "color": "sean-payton", "priority": 500000}
+    else:
+        return {"rank": 3, "label": "🏈 BRONCOS", "color": "broncos", "priority": 100000}
+
+def search_viral_tweets(keywords, hours=48):
+    """Search for TRULY viral tweets with minimum thresholds"""
+    query = " OR ".join([f'"{k}"' for k in keywords]) + " -is:retweet lang:en"
+    start_time = datetime.utcnow() - timedelta(hours=hours)
+    
+    try:
+        tweets = client_twitter.search_recent_tweets(
+            query=query,
+            max_results=100,
+            start_time=start_time,
+            tweet_fields=['public_metrics', 'created_at'],
+            expansions=['author_id'],
+            user_fields=['username', 'name']
+        )
+        
+        if not tweets.data:
+            return []
+        
+        users = {user.id: user for user in tweets.includes['users']}
+        viral_tweets = []
+        
+        for tweet in tweets.data:
+            metrics = tweet.public_metrics
+            
+            # FILTER: Only tweets meeting VIRAL thresholds
+            if (metrics['reply_count'] >= 30 and 
+                metrics['like_count'] >= 100 and 
+                metrics['retweet_count'] >= 15):
+                
+                priority_info = determine_priority(tweet.text)
+                
+                # RANK: Replies first (x10000), then retweets (x100), then likes (x1)
+                engagement_score = (
+                    (metrics['reply_count'] * 10000) + 
+                    (metrics['retweet_count'] * 100) + 
+                    metrics['like_count'] + 
+                    priority_info['priority']
+                )
+                
+                user = users.get(tweet.author_id)
+                
+                viral_tweets.append({
+                    'id': tweet.id,
+                    'text': tweet.text,
+                    'author': user.username if user else 'Unknown',
+                    'author_name': user.name if user else 'Unknown',
+                    'created_at': tweet.created_at,
+                    'likes': metrics['like_count'],
+                    'retweets': metrics['retweet_count'],
+                    'replies': metrics['reply_count'],
+                    'engagement_score': engagement_score,
+                    'priority': priority_info
+                })
+        
+        # Sort by engagement score (replies weighted highest)
+        viral_tweets.sort(key=lambda x: x['engagement_score'], reverse=True)
+        return viral_tweets
+    
+    except Exception as e:
+        st.error(f"Error: {str(e)}")
+        return []
+
+def generate_rewrites(original_tweet):
+    """Generate all 4 rewrite styles at once"""
+    styles = {
+        "Default": "Rewrite this tweet in Tyler's voice as a Broncos analyst. Keep it punchy and real.",
+        "Analytical": "Rewrite with deep analysis. What would a former player see that others don't?",
+        "Controversial": "Rewrite as a spicy take. Call out bad decisions. Make it debatable.",
+        "Personal": "Rewrite with personal playing experience. Reference the locker room."
+    }
+    
+    rewrites = {}
+    
+    for style_name, prompt in styles.items():
+        try:
+            message = client.messages.create(
+                model="claude-sonnet-4-5-20250929",
+                max_tokens=280,
+                messages=[{
+                    "role": "user",
+                    "content": f"""You are Tyler, a Denver Broncos analyst and former player.
+
+Original tweet: "{original_tweet}"
+
+{prompt}
+
+Keep it under 280 characters. Sound like Tyler - insider perspective, conversational, punchy."""
+                }]
+            )
+            rewrites[style_name] = message.content[0].text
+        except Exception as e:
+            rewrites[style_name] = f"ERROR: {str(e)}"
+    
+    return rewrites
+
 if st.button("🔍 Scan for Viral Broncos & Nuggets Bangers", use_container_width=True):
     with st.spinner("Scanning for absolute viral bangers (30+ replies, 100+ likes, 15+ RTs)..."):
         # Search Broncos
