@@ -1,72 +1,4 @@
-for tweet in tweets:
-    # Tweet card with clickable link
-    tweet_url = f"https://twitter.com/{tweet['author']}/status/{tweet['id']}"
-    st.markdown(f"""
-    <div class="tweet-card">
-        <div class="tweet-header">
-            <span class="priority-badge {tweet['priority']['color']}">{tweet['priority']['label']}</span>
-            <strong>{tweet['author_name']}</strong> @{tweet['author']}
-        </div>
-        <div class="tweet-text">{tweet['text']}</div>
-        <div class="tweet-metrics">
-            <span class="metric-high">💬 {tweet['replies']} replies</span>
-            <span>❤️ {tweet['likes']}</span>
-            <span>🔄 {tweet['retweets']}</span>
-        </div>
-        <a href="{tweet_url}" target="_blank" style="color: #1d9bf0; text-decoration: none;">🔗 View on Twitter →</a>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Show images/videos if attached
-    try:
-        tweet_details = client_twitter.get_tweet(
-            tweet['id'], 
-            expansions='attachments.media_keys', 
-            media_fields='url,preview_image_url,type,variants'
-        )
-        
-        if tweet_details.includes and 'media' in tweet_details.includes:
-            st.markdown("**📸 Media:**")
-            for media in tweet_details.includes['media']:
-                if media.type == 'photo':
-                    if hasattr(media, 'url') and media.url:
-                        st.image(media.url, use_container_width=True)
-                elif media.type == 'video' or media.type == 'animated_gif':
-                    if hasattr(media, 'preview_image_url') and media.preview_image_url:
-                        st.image(media.preview_image_url, caption="Video preview", use_container_width=True)
-    except:
-        pass
-    
-    # Generate all 4 rewrites
-    with st.spinner("Generating rewrites in your voice..."):
-        rewrites = generate_rewrites(tweet['text'])
-    
-    # Show all rewrites as previews
-    st.markdown("**✍️ Your Rewrites (Pick One to Edit & Post):**")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown(f"<div class='rewrite-preview'><strong>Default:</strong><br>{rewrites['Default']}</div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='rewrite-preview'><strong>Analytical:</strong><br>{rewrites['Analytical']}</div>", unsafe_allow_html=True)
-    
-    with col2:
-        st.markdown(f"<div class='rewrite-preview'><strong>Controversial:</strong><br>{rewrites['Controversial']}</div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='rewrite-preview'><strong>Personal:</strong><br>{rewrites['Personal']}</div>", unsafe_allow_html=True)
-    
-    st.markdown("---")
-Commit that complete section and it should work!Just give me the whole file to replace12:39 PMConsolidated fragmented edits into complete, polished application fileThe user is asking me to give them the complete file to replace. This makes sense - we've been doing piecemeal edits and it's getting messy with indentation errors. Let me provide the complete, clean streamlit_app.py file with all the features we've built:
-
-Twitter-like dark theme
-Bo Nix > Sean Payton > Other Broncos prioritization
-Reply count prioritization
-Clickable Twitter links
-Image/video display
-All 4 rewrite styles shown as previews
-Clean, modern design
-
-Let me create the complete file with proper indentation.Show moreDoneHere's the complete file. Copy and paste this entire thing into your streamlit_app.py:
-pythonimport streamlit as st
+import streamlit as st
 import tweepy
 from anthropic import Anthropic
 from datetime import datetime, timedelta
@@ -74,7 +6,6 @@ import os
 
 st.set_page_config(page_title="Broncos Tweet Hunter", layout="wide", initial_sidebar_state="collapsed")
 
-# Custom CSS to make it look like Twitter
 st.markdown("""
 <style>
     .main { background-color: #000000; color: #e7e9ea; }
@@ -93,6 +24,11 @@ st.markdown("""
         border-radius: 16px;
         padding: 16px;
         margin: 12px 0;
+    }
+    .top-pick {
+        background-color: #1a2332;
+        border: 2px solid #1d9bf0;
+        box-shadow: 0 0 20px rgba(29, 155, 240, 0.3);
     }
     .tweet-header {
         display: flex;
@@ -129,13 +65,22 @@ st.markdown("""
         font-weight: bold;
         margin-right: 8px;
     }
+    .top-pick-badge {
+        background-color: #1d9bf0;
+        color: white;
+        padding: 6px 14px;
+        border-radius: 20px;
+        font-size: 13px;
+        font-weight: bold;
+        margin-bottom: 8px;
+        display: inline-block;
+    }
     .bo-nix { background-color: #ff4500; color: white; }
     .sean-payton { background-color: #ff8c00; color: white; }
     .broncos { background-color: #fb4f14; color: white; }
 </style>
 """, unsafe_allow_html=True)
 
-# Set environment variables from secrets
 os.environ["TWITTER_BEARER_TOKEN"] = st.secrets["TWITTER_BEARER_TOKEN"]
 os.environ["ANTHROPIC_API_KEY"] = st.secrets["ANTHROPIC_API_KEY"]
 
@@ -143,12 +88,11 @@ client = Anthropic()
 client_twitter = tweepy.Client(bearer_token=os.environ["TWITTER_BEARER_TOKEN"], wait_on_rate_limit=True)
 
 st.title("🏈 Broncos Tweet Hunter")
-st.caption("Find viral Broncos debates from the last 48 hours")
+st.caption("Find viral bangers from the last 48 hours")
 
 def determine_priority(tweet_text):
     """Determine ranking priority based on content"""
     text_lower = tweet_text.lower()
-    
     if "bo nix" in text_lower or "bo mix" in text_lower:
         return {"rank": 1, "label": "🔥 BO NIX", "color": "bo-nix", "priority": 1000000}
     elif "sean payton" in text_lower or "payton" in text_lower:
@@ -175,33 +119,43 @@ def search_viral_tweets(keywords, hours=48):
             return []
         
         users = {user.id: user for user in tweets.includes['users']}
-        scored_tweets = []
+        viral_tweets = []
         
         for tweet in tweets.data:
             metrics = tweet.public_metrics
-            priority_info = determine_priority(tweet.text)
             
-            # Prioritize by replies first (controversy), then add priority boost
-            engagement_score = (metrics['reply_count'] * 1000) + priority_info['priority']
-            
-            user = users.get(tweet.author_id)
-            
-            scored_tweets.append({
-                'id': tweet.id,
-                'text': tweet.text,
-                'author': user.username if user else 'Unknown',
-                'author_name': user.name if user else 'Unknown',
-                'created_at': tweet.created_at,
-                'likes': metrics['like_count'],
-                'retweets': metrics['retweet_count'],
-                'replies': metrics['reply_count'],
-                'impressions': metrics.get('impression_count', 0),
-                'engagement_score': engagement_score,
-                'priority': priority_info
-            })
+            # Filter: 10+ replies, 50+ likes, 5+ RTs
+            if (metrics['reply_count'] >= 10 and 
+                metrics['like_count'] >= 50 and 
+                metrics['retweet_count'] >= 5):
+                
+                priority_info = determine_priority(tweet.text)
+                
+                # Rank: Replies (x10000), Retweets (x100), Likes (x1)
+                engagement_score = (
+                    (metrics['reply_count'] * 10000) + 
+                    (metrics['retweet_count'] * 100) + 
+                    metrics['like_count'] + 
+                    priority_info['priority']
+                )
+                
+                user = users.get(tweet.author_id)
+                
+                viral_tweets.append({
+                    'id': tweet.id,
+                    'text': tweet.text,
+                    'author': user.username if user else 'Unknown',
+                    'author_name': user.name if user else 'Unknown',
+                    'created_at': tweet.created_at,
+                    'likes': metrics['like_count'],
+                    'retweets': metrics['retweet_count'],
+                    'replies': metrics['reply_count'],
+                    'engagement_score': engagement_score,
+                    'priority': priority_info
+                })
         
-        scored_tweets.sort(key=lambda x: x['engagement_score'], reverse=True)
-        return scored_tweets[:10]
+        viral_tweets.sort(key=lambda x: x['engagement_score'], reverse=True)
+        return viral_tweets
     
     except Exception as e:
         st.error(f"Error: {str(e)}")
@@ -240,70 +194,229 @@ Keep it under 280 characters. Sound like Tyler - insider perspective, conversati
     
     return rewrites
 
-if st.button("🔍 Scan for Viral Broncos Debates", use_container_width=True):
-    with st.spinner("Scanning Twitter for controversial Broncos content..."):
-        keywords = ["Denver Broncos", "Sean Payton", "Bo Nix", "Broncos"]
-        tweets = search_viral_tweets(keywords)
+if st.button("🔍 Scan for Viral Broncos & Nuggets", use_container_width=True):
+    with st.spinner("Scanning for viral bangers (10+ replies, 50+ likes, 5+ RTs)..."):
+        # Search Broncos
+        broncos_keywords = ["Denver Broncos", "Sean Payton", "Bo Nix", "Broncos"]
+        broncos_tweets = search_viral_tweets(broncos_keywords)
         
-        if tweets:
-            st.success(f"✅ Found {len(tweets)} viral debates! Sorted by controversy (reply count).")
+        # Search Nuggets
+        nuggets_keywords = ["Denver Nuggets", "Nikola Jokic", "Nuggets"]
+        nuggets_tweets = search_viral_tweets(nuggets_keywords)
+        
+        # Get top 10 Broncos and top 5 Nuggets
+        top_broncos = broncos_tweets[:10]
+        top_nuggets = nuggets_tweets[:5]
+        
+        if top_broncos or top_nuggets:
+            st.success(f"✅ Found {len(top_broncos)} Broncos + {len(top_nuggets)} Nuggets viral bangers!")
             
-            for tweet in tweets:
-                # Tweet card with clickable link
-                tweet_url = f"https://twitter.com/{tweet['author']}/status/{tweet['id']}"
-                st.markdown(f"""
-                <div class="tweet-card">
-                    <div class="tweet-header">
-                        <span class="priority-badge {tweet['priority']['color']}">{tweet['priority']['label']}</span>
-                        <strong>{tweet['author_name']}</strong> @{tweet['author']}
-                    </div>
-                    <div class="tweet-text">{tweet['text']}</div>
-                    <div class="tweet-metrics">
-                        <span class="metric-high">💬 {tweet['replies']} replies</span>
-                        <span>❤️ {tweet['likes']}</span>
-                        <span>🔄 {tweet['retweets']}</span>
-                    </div>
-                    <a href="{tweet_url}" target="_blank" style="color: #1d9bf0; text-decoration: none;">🔗 View on Twitter →</a>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                # Show images/videos if attached
-                try:
-                    tweet_details = client_twitter.get_tweet(
-                        tweet['id'], 
-                        expansions='attachments.media_keys', 
-                        media_fields='url,preview_image_url,type,variants'
-                    )
+            # TOP 3 BRONCOS PICKS
+            if len(top_broncos) >= 3:
+                st.markdown("### ⭐ TOP 3 BRONCOS PICKS")
+                for i, tweet in enumerate(top_broncos[:3]):
+                    tweet_url = f"https://twitter.com/{tweet['author']}/status/{tweet['id']}"
                     
-                    if tweet_details.includes and 'media' in tweet_details.includes:
-                        st.markdown("**📸 Media:**")
-                        for media in tweet_details.includes['media']:
-                            if media.type == 'photo':
-                                if hasattr(media, 'url') and media.url:
-                                    st.image(media.url, use_container_width=True)
-                            elif media.type == 'video' or media.type == 'animated_gif':
-                                if hasattr(media, 'preview_image_url') and media.preview_image_url:
-                                    st.image(media.preview_image_url, caption="Video preview", use_container_width=True)
-                except:
-                    pass
-                
-                # Generate all 4 rewrites
-                with st.spinner("Generating rewrites in your voice..."):
-                    rewrites = generate_rewrites(tweet['text'])
-                
-                # Show all rewrites as previews
-                st.markdown("**✍️ Your Rewrites (Pick One to Edit & Post):**")
-                
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    st.markdown(f"<div class='rewrite-preview'><strong>Default:</strong><br>{rewrites['Default']}</div>", unsafe_allow_html=True)
-                    st.markdown(f"<div class='rewrite-preview'><strong>Analytical:</strong><br>{rewrites['Analytical']}</div>", unsafe_allow_html=True)
-                
-                with col2:
-                    st.markdown(f"<div class='rewrite-preview'><strong>Controversial:</strong><br>{rewrites['Controversial']}</div>", unsafe_allow_html=True)
-                    st.markdown(f"<div class='rewrite-preview'><strong>Personal:</strong><br>{rewrites['Personal']}</div>", unsafe_allow_html=True)
-                
-                st.markdown("---")
+                    st.markdown(f"""
+                    <div class="tweet-card top-pick">
+                        <span class="top-pick-badge">⭐ TOP PICK #{i+1}</span>
+                        <div class="tweet-header">
+                            <span class="priority-badge {tweet['priority']['color']}">{tweet['priority']['label']}</span>
+                            <strong>{tweet['author_name']}</strong> @{tweet['author']}
+                        </div>
+                        <div class="tweet-text">{tweet['text']}</div>
+                        <div class="tweet-metrics">
+                            <span class="metric-high">💬 {tweet['replies']} replies</span>
+                            <span class="metric-high">🔄 {tweet['retweets']} RTs</span>
+                            <span class="metric-high">❤️ {tweet['likes']} likes</span>
+                        </div>
+                        <a href="{tweet_url}" target="_blank" style="color: #1d9bf0; text-decoration: none;">🔗 View on Twitter →</a>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    # Show media
+                    try:
+                        tweet_details = client_twitter.get_tweet(
+                            tweet['id'], 
+                            expansions='attachments.media_keys', 
+                            media_fields='url,preview_image_url,type,variants'
+                        )
+                        
+                        if tweet_details.includes and 'media' in tweet_details.includes:
+                            st.markdown("**📸 Media:**")
+                            for media in tweet_details.includes['media']:
+                                if media.type == 'photo':
+                                    if hasattr(media, 'url') and media.url:
+                                        st.image(media.url, use_container_width=True)
+                                elif media.type == 'video' or media.type == 'animated_gif':
+                                    if hasattr(media, 'preview_image_url') and media.preview_image_url:
+                                        st.image(media.preview_image_url, caption="Video preview", use_container_width=True)
+                    except:
+                        pass
+                    
+                    with st.spinner("Generating rewrites..."):
+                        rewrites = generate_rewrites(tweet['text'])
+                    
+                    st.markdown("**✍️ Your Rewrites:**")
+                    
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.markdown(f"<div class='rewrite-preview'><strong>Default:</strong><br>{rewrites['Default']}</div>", unsafe_allow_html=True)
+                        if st.button(f"📋 Copy", key=f"copy_default_{i}"):
+                            st.code(rewrites['Default'], language=None)
+                        
+                        st.markdown(f"<div class='rewrite-preview'><strong>Analytical:</strong><br>{rewrites['Analytical']}</div>", unsafe_allow_html=True)
+                        if st.button(f"📋 Copy", key=f"copy_analytical_{i}"):
+                            st.code(rewrites['Analytical'], language=None)
+                    
+                    with col2:
+                        st.markdown(f"<div class='rewrite-preview'><strong>Controversial:</strong><br>{rewrites['Controversial']}</div>", unsafe_allow_html=True)
+                        if st.button(f"📋 Copy", key=f"copy_controversial_{i}"):
+                            st.code(rewrites['Controversial'], language=None)
+                        
+                        st.markdown(f"<div class='rewrite-preview'><strong>Personal:</strong><br>{rewrites['Personal']}</div>", unsafe_allow_html=True)
+                        if st.button(f"📋 Copy", key=f"copy_personal_{i}"):
+                            st.code(rewrites['Personal'], language=None)
+                    
+                    st.markdown("---")
+            
+            # OTHER BRONCOS TWEETS
+            if len(top_broncos) > 3:
+                st.markdown("### 🏈 Other Broncos Tweets")
+                for i, tweet in enumerate(top_broncos[3:], start=3):
+                    tweet_url = f"https://twitter.com/{tweet['author']}/status/{tweet['id']}"
+                    
+                    st.markdown(f"""
+                    <div class="tweet-card">
+                        <div class="tweet-header">
+                            <span class="priority-badge {tweet['priority']['color']}">{tweet['priority']['label']}</span>
+                            <strong>{tweet['author_name']}</strong> @{tweet['author']}
+                        </div>
+                        <div class="tweet-text">{tweet['text']}</div>
+                        <div class="tweet-metrics">
+                            <span class="metric-high">💬 {tweet['replies']} replies</span>
+                            <span>🔄 {tweet['retweets']} RTs</span>
+                            <span>❤️ {tweet['likes']} likes</span>
+                        </div>
+                        <a href="{tweet_url}" target="_blank" style="color: #1d9bf0; text-decoration: none;">🔗 View on Twitter →</a>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    # Show media
+                    try:
+                        tweet_details = client_twitter.get_tweet(
+                            tweet['id'], 
+                            expansions='attachments.media_keys', 
+                            media_fields='url,preview_image_url,type,variants'
+                        )
+                        
+                        if tweet_details.includes and 'media' in tweet_details.includes:
+                            st.markdown("**📸 Media:**")
+                            for media in tweet_details.includes['media']:
+                                if media.type == 'photo':
+                                    if hasattr(media, 'url') and media.url:
+                                        st.image(media.url, use_container_width=True)
+                                elif media.type == 'video' or media.type == 'animated_gif':
+                                    if hasattr(media, 'preview_image_url') and media.preview_image_url:
+                                        st.image(media.preview_image_url, caption="Video preview", use_container_width=True)
+                    except:
+                        pass
+                    
+                    with st.spinner("Generating rewrites..."):
+                        rewrites = generate_rewrites(tweet['text'])
+                    
+                    st.markdown("**✍️ Your Rewrites:**")
+                    
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.markdown(f"<div class='rewrite-preview'><strong>Default:</strong><br>{rewrites['Default']}</div>", unsafe_allow_html=True)
+                        if st.button(f"📋 Copy", key=f"copy_default_b{i}"):
+                            st.code(rewrites['Default'], language=None)
+                        
+                        st.markdown(f"<div class='rewrite-preview'><strong>Analytical:</strong><br>{rewrites['Analytical']}</div>", unsafe_allow_html=True)
+                        if st.button(f"📋 Copy", key=f"copy_analytical_b{i}"):
+                            st.code(rewrites['Analytical'], language=None)
+                    
+                    with col2:
+                        st.markdown(f"<div class='rewrite-preview'><strong>Controversial:</strong><br>{rewrites['Controversial']}</div>", unsafe_allow_html=True)
+                        if st.button(f"📋 Copy", key=f"copy_controversial_b{i}"):
+                            st.code(rewrites['Controversial'], language=None)
+                        
+                        st.markdown(f"<div class='rewrite-preview'><strong>Personal:</strong><br>{rewrites['Personal']}</div>", unsafe_allow_html=True)
+                        if st.button(f"📋 Copy", key=f"copy_personal_b{i}"):
+                            st.code(rewrites['Personal'], language=None)
+                    
+                    st.markdown("---")
+            
+            # NUGGETS TWEETS
+            if top_nuggets:
+                st.markdown("### 🏀 Denver Nuggets Tweets")
+                for i, tweet in enumerate(top_nuggets):
+                    tweet_url = f"https://twitter.com/{tweet['author']}/status/{tweet['id']}"
+                    
+                    st.markdown(f"""
+                    <div class="tweet-card">
+                        <div class="tweet-header">
+                            <span class="priority-badge" style="background-color: #fdb927; color: #00285e;">🏀 NUGGETS</span>
+                            <strong>{tweet['author_name']}</strong> @{tweet['author']}
+                        </div>
+                        <div class="tweet-text">{tweet['text']}</div>
+                        <div class="tweet-metrics">
+                            <span class="metric-high">💬 {tweet['replies']} replies</span>
+                            <span>🔄 {tweet['retweets']} RTs</span>
+                            <span>❤️ {tweet['likes']} likes</span>
+                        </div>
+                        <a href="{tweet_url}" target="_blank" style="color: #1d9bf0; text-decoration: none;">🔗 View on Twitter →</a>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    # Show media
+                    try:
+                        tweet_details = client_twitter.get_tweet(
+                            tweet['id'], 
+                            expansions='attachments.media_keys', 
+                            media_fields='url,preview_image_url,type,variants'
+                        )
+                        
+                        if tweet_details.includes and 'media' in tweet_details.includes:
+                            st.markdown("**📸 Media:**")
+                            for media in tweet_details.includes['media']:
+                                if media.type == 'photo':
+                                    if hasattr(media, 'url') and media.url:
+                                        st.image(media.url, use_container_width=True)
+                                elif media.type == 'video' or media.type == 'animated_gif':
+                                    if hasattr(media, 'preview_image_url') and media.preview_image_url:
+                                        st.image(media.preview_image_url, caption="Video preview", use_container_width=True)
+                    except:
+                        pass
+                    
+                    with st.spinner("Generating rewrites..."):
+                        rewrites = generate_rewrites(tweet['text'])
+                    
+                    st.markdown("**✍️ Your Rewrites:**")
+                    
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.markdown(f"<div class='rewrite-preview'><strong>Default:</strong><br>{rewrites['Default']}</div>", unsafe_allow_html=True)
+                        if st.button(f"📋 Copy", key=f"copy_default_n{i}"):
+                            st.code(rewrites['Default'], language=None)
+                        
+                        st.markdown(f"<div class='rewrite-preview'><strong>Analytical:</strong><br>{rewrites['Analytical']}</div>", unsafe_allow_html=True)
+                        if st.button(f"📋 Copy", key=f"copy_analytical_n{i}"):
+                            st.code(rewrites['Analytical'], language=None)
+                    
+                    with col2:
+                        st.markdown(f"<div class='rewrite-preview'><strong>Controversial:</strong><br>{rewrites['Controversial']}</div>", unsafe_allow_html=True)
+                        if st.button(f"📋 Copy", key=f"copy_controversial_n{i}"):
+                            st.code(rewrites['Controversial'], language=None)
+                        
+                        st.markdown(f"<div class='rewrite-preview'><strong>Personal:</strong><br>{rewrites['Personal']}</div>", unsafe_allow_html=True)
+                        if st.button(f"📋 Copy", key=f"copy_personal_n{i}"):
+                            st.code(rewrites['Personal'], language=None)
+                    
+                    st.markdown("---")
         else:
-            st.warning("No tweets found. Try again in a few moments!")
+            st.warning("No viral bangers found matching your criteria. Try again later!")
