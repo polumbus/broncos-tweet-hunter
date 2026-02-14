@@ -1,4 +1,4 @@
-iimport streamlit as st
+import streamlit as st
 import tweepy
 from anthropic import Anthropic
 from datetime import datetime, timedelta
@@ -362,3 +362,4 @@ if st.button("🔍 Scan for Viral Broncos & Nuggets Bangers", use_container_widt
                     st.markdown("---")
         else:
             st.warning("No viral bangers found matching your criteria (30+ replies, 100+ likes, 15+ RTs). Try again in a few hours!")
+
