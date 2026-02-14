@@ -151,7 +151,7 @@ def generate_rewrites(original_tweet):
     for style_name, prompt in styles.items():
         try:
             message = client.messages.create(
-                model="claude-3-5-sonnet-20241022",
+                model="claude-sonnet-4-5-20250929",
                 max_tokens=280,
                 messages=[{
                     "role": "user",
@@ -215,5 +215,6 @@ if st.button("🔍 Scan for Viral Broncos Debates", use_container_width=True):
                 st.markdown("---")
         else:
             st.warning("No tweets found. Try again in a few moments!")
+
 
 
