@@ -91,14 +91,14 @@ st.title("🏈 Broncos Tweet Hunter")
 st.caption("Find viral Broncos & Nuggets debates from the last 48 hours")
 
 def determine_priority(tweet_text):
-    """Determine ranking priority based on content"""
+    """Determine ranking priority based on content - SMALL tiebreaker only"""
     text_lower = tweet_text.lower()
     if "bo nix" in text_lower or "bo mix" in text_lower:
-        return {"rank": 1, "label": "🔥 BO NIX", "color": "bo-nix", "priority": 1000000}
+        return {"rank": 1, "label": "🔥 BO NIX", "color": "bo-nix", "priority": 100}
     elif "sean payton" in text_lower or "payton" in text_lower:
-        return {"rank": 2, "label": "⚡ SEAN PAYTON", "color": "sean-payton", "priority": 500000}
+        return {"rank": 2, "label": "⚡ SEAN PAYTON", "color": "sean-payton", "priority": 50}
     else:
-        return {"rank": 3, "label": "🏈 BRONCOS", "color": "broncos", "priority": 100000}
+        return {"rank": 3, "label": "🏈 BRONCOS", "color": "broncos", "priority": 10}
 
 def search_viral_tweets(keywords, hours=48):
     """Search for viral tweets"""
@@ -125,7 +125,7 @@ def search_viral_tweets(keywords, hours=48):
             metrics = tweet.public_metrics
             priority_info = determine_priority(tweet.text)
             
-            # RANKING: Replies (x10000) → Retweets (x100) → Likes (x1)
+            # RANKING: Replies (x10000) → Retweets (x100) → Likes (x1) → Priority (tiny tiebreaker)
             engagement_score = (
                 (metrics['reply_count'] * 10000) + 
                 (metrics['retweet_count'] * 100) + 
