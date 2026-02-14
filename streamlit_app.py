@@ -15,7 +15,7 @@ if not bearer_token or not api_key:
     st.error("API keys missing! Add them in Streamlit Secrets.")
     st.stop()
 
-client = Anthropic(api_key=api_key)
+client = Anthropic()
 client_twitter = tweepy.Client(bearer_token=bearer_token, wait_on_rate_limit=True)
 
 st.success("✅ Connected to Twitter and Claude AI!")
@@ -66,6 +66,7 @@ if st.button("🔍 Scan for Viral Tweets"):
             
     except Exception as e:
         st.error(f"Error: {str(e)}")
+
 
 
 
