@@ -101,7 +101,7 @@ def determine_priority(tweet_text):
         return {"rank": 3, "label": "🏈 BRONCOS", "color": "broncos", "priority": 100000}
 
 def search_viral_tweets(keywords, hours=48):
-    """Search for TRULY viral tweets with minimum thresholds"""
+    """Search for viral tweets with minimum thresholds"""
     query = " OR ".join([f'"{k}"' for k in keywords]) + " -is:retweet lang:en"
     start_time = datetime.utcnow() - timedelta(hours=hours)
     
@@ -124,10 +124,10 @@ def search_viral_tweets(keywords, hours=48):
         for tweet in tweets.data:
             metrics = tweet.public_metrics
             
-            # FILTER: Only tweets meeting VIRAL thresholds
-            if (metrics['reply_count'] >= 30 and 
-                metrics['like_count'] >= 100 and 
-                metrics['retweet_count'] >= 15):
+            # FILTER: Lowered viral thresholds to find more tweets
+            if (metrics['reply_count'] >= 10 and 
+                metrics['like_count'] >= 50 and 
+                metrics['retweet_count'] >= 5):
                 
                 priority_info = determine_priority(tweet.text)
                 
@@ -196,7 +196,7 @@ Keep it under 280 characters. Sound like Tyler - insider perspective, conversati
     return rewrites
 
 if st.button("🔍 Scan for Viral Broncos & Nuggets Bangers", use_container_width=True):
-    with st.spinner("Scanning for absolute viral bangers (30+ replies, 100+ likes, 15+ RTs)..."):
+    with st.spinner("Scanning for viral bangers (10+ replies, 50+ likes, 5+ RTs)..."):
         # Search Broncos
         broncos_keywords = ["Denver Broncos", "Sean Payton", "Bo Nix", "Broncos"]
         broncos_tweets = search_viral_tweets(broncos_keywords)
@@ -215,55 +215,56 @@ if st.button("🔍 Scan for Viral Broncos & Nuggets Bangers", use_container_widt
             st.success(f"✅ Found {len(top_broncos)} Broncos + {len(top_nuggets)} Nuggets viral bangers!")
             
             # Show TOP 3 Broncos picks first
-            st.markdown("### ⭐ TOP 3 BRONCOS PICKS")
-            for i, tweet in enumerate(top_broncos[:3]):
-                tweet_url = f"https://twitter.com/{tweet['author']}/status/{tweet['id']}"
-                
-                st.markdown(f"""
-                <div class="tweet-card top-pick">
-                    <span class="top-pick-badge">⭐ TOP PICK #{i+1}</span>
-                    <div class="tweet-header">
-                        <span class="priority-badge {tweet['priority']['color']}">{tweet['priority']['label']}</span>
-                        <strong>{tweet['author_name']}</strong> @{tweet['author']}
-                    </div>
-                    <div class="tweet-text">{tweet['text']}</div>
-                    <div class="tweet-metrics">
-                        <span class="metric-high">💬 {tweet['replies']} replies</span>
-                        <span class="metric-high">🔄 {tweet['retweets']} RTs</span>
-                        <span class="metric-high">❤️ {tweet['likes']} likes</span>
-                    </div>
-                    <a href="{tweet_url}" target="_blank" style="color: #1d9bf0; text-decoration: none;">🔗 View on Twitter →</a>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                with st.spinner("Generating rewrites..."):
-                    rewrites = generate_rewrites(tweet['text'])
-                
-                st.markdown("**✍️ Your Rewrites:**")
-                
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    st.markdown(f"<div class='rewrite-preview'><strong>Default:</strong><br>{rewrites['Default']}</div>", unsafe_allow_html=True)
-                    if st.button(f"📋 Copy Default", key=f"copy_default_{i}"):
-                        st.code(rewrites['Default'], language=None)
+            if len(top_broncos) >= 3:
+                st.markdown("### ⭐ TOP 3 BRONCOS PICKS")
+                for i, tweet in enumerate(top_broncos[:3]):
+                    tweet_url = f"https://twitter.com/{tweet['author']}/status/{tweet['id']}"
                     
-                    st.markdown(f"<div class='rewrite-preview'><strong>Analytical:</strong><br>{rewrites['Analytical']}</div>", unsafe_allow_html=True)
-                    if st.button(f"📋 Copy Analytical", key=f"copy_analytical_{i}"):
-                        st.code(rewrites['Analytical'], language=None)
-                
-                with col2:
-                    st.markdown(f"<div class='rewrite-preview'><strong>Controversial:</strong><br>{rewrites['Controversial']}</div>", unsafe_allow_html=True)
-                    if st.button(f"📋 Copy Controversial", key=f"copy_controversial_{i}"):
-                        st.code(rewrites['Controversial'], language=None)
+                    st.markdown(f"""
+                    <div class="tweet-card top-pick">
+                        <span class="top-pick-badge">⭐ TOP PICK #{i+1}</span>
+                        <div class="tweet-header">
+                            <span class="priority-badge {tweet['priority']['color']}">{tweet['priority']['label']}</span>
+                            <strong>{tweet['author_name']}</strong> @{tweet['author']}
+                        </div>
+                        <div class="tweet-text">{tweet['text']}</div>
+                        <div class="tweet-metrics">
+                            <span class="metric-high">💬 {tweet['replies']} replies</span>
+                            <span class="metric-high">🔄 {tweet['retweets']} RTs</span>
+                            <span class="metric-high">❤️ {tweet['likes']} likes</span>
+                        </div>
+                        <a href="{tweet_url}" target="_blank" style="color: #1d9bf0; text-decoration: none;">🔗 View on Twitter →</a>
+                    </div>
+                    """, unsafe_allow_html=True)
                     
-                    st.markdown(f"<div class='rewrite-preview'><strong>Personal:</strong><br>{rewrites['Personal']}</div>", unsafe_allow_html=True)
-                    if st.button(f"📋 Copy Personal", key=f"copy_personal_{i}"):
-                        st.code(rewrites['Personal'], language=None)
-                
-                st.markdown("---")
+                    with st.spinner("Generating rewrites..."):
+                        rewrites = generate_rewrites(tweet['text'])
+                    
+                    st.markdown("**✍️ Your Rewrites:**")
+                    
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.markdown(f"<div class='rewrite-preview'><strong>Default:</strong><br>{rewrites['Default']}</div>", unsafe_allow_html=True)
+                        if st.button(f"📋 Copy Default", key=f"copy_default_{i}"):
+                            st.code(rewrites['Default'], language=None)
+                        
+                        st.markdown(f"<div class='rewrite-preview'><strong>Analytical:</strong><br>{rewrites['Analytical']}</div>", unsafe_allow_html=True)
+                        if st.button(f"📋 Copy Analytical", key=f"copy_analytical_{i}"):
+                            st.code(rewrites['Analytical'], language=None)
+                    
+                    with col2:
+                        st.markdown(f"<div class='rewrite-preview'><strong>Controversial:</strong><br>{rewrites['Controversial']}</div>", unsafe_allow_html=True)
+                        if st.button(f"📋 Copy Controversial", key=f"copy_controversial_{i}"):
+                            st.code(rewrites['Controversial'], language=None)
+                        
+                        st.markdown(f"<div class='rewrite-preview'><strong>Personal:</strong><br>{rewrites['Personal']}</div>", unsafe_allow_html=True)
+                        if st.button(f"📋 Copy Personal", key=f"copy_personal_{i}"):
+                            st.code(rewrites['Personal'], language=None)
+                    
+                    st.markdown("---")
             
-            # Show remaining 7 Broncos tweets
+            # Show remaining Broncos tweets
             if len(top_broncos) > 3:
                 st.markdown("### 🏈 Other Broncos Tweets")
                 for i, tweet in enumerate(top_broncos[3:], start=3):
@@ -312,7 +313,7 @@ if st.button("🔍 Scan for Viral Broncos & Nuggets Bangers", use_container_widt
                     
                     st.markdown("---")
             
-            # Show 5 Nuggets tweets
+            # Show Nuggets tweets
             if top_nuggets:
                 st.markdown("### 🏀 Denver Nuggets Tweets")
                 for i, tweet in enumerate(top_nuggets):
@@ -361,5 +362,4 @@ if st.button("🔍 Scan for Viral Broncos & Nuggets Bangers", use_container_widt
                     
                     st.markdown("---")
         else:
-            st.warning("No viral bangers found matching your criteria (30+ replies, 100+ likes, 15+ RTs). Try again in a few hours!")
-
+            st.warning("No viral bangers found matching your criteria (10+ replies, 50+ likes, 5+ RTs). Try again in a few hours!")
