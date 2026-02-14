@@ -41,11 +41,6 @@ st.markdown("""
         color: #e7e9ea;
         margin-bottom: 12px;
     }
-    .tweet-media {
-        margin: 12px 0;
-        border-radius: 16px;
-        overflow: hidden;
-    }
     .tweet-metrics {
         display: flex;
         gap: 20px;
@@ -160,39 +155,41 @@ def search_viral_tweets(keywords, hours=48):
         return []
 
 def fetch_tweet_media(tweet_id):
-    """Fetch media for a specific tweet"""
+    """Fetch media for a specific tweet - WITH DEBUG INFO"""
     try:
+        st.write(f"🔍 DEBUG: Attempting to fetch media for tweet ID: {tweet_id}")
+        
         tweet_data = client_twitter.get_tweet(
             tweet_id,
             expansions=['attachments.media_keys'],
             media_fields=['url', 'preview_image_url', 'type', 'variants']
         )
         
-        if tweet_data.includes and 'media' in tweet_data.includes:
-            return tweet_data.includes['media']
+        st.write(f"✅ DEBUG: Tweet data fetched successfully")
+        
+        if hasattr(tweet_data, 'includes'):
+            st.write(f"✅ DEBUG: Tweet has 'includes' attribute")
+            if tweet_data.includes and 'media' in tweet_data.includes:
+                media_count = len(tweet_data.includes['media'])
+                st.write(f"✅ DEBUG: Found {media_count} media items!")
+                
+                for idx, media in enumerate(tweet_data.includes['media']):
+                    st.write(f"📸 DEBUG Media #{idx+1}: Type={media.type}")
+                    if hasattr(media, 'url'):
+                        st.write(f"   URL: {media.url}")
+                    if hasattr(media, 'preview_image_url'):
+                        st.write(f"   Preview URL: {media.preview_image_url}")
+                
+                return tweet_data.includes['media']
+            else:
+                st.write("⚠️ DEBUG: No 'media' in includes")
+        else:
+            st.write("⚠️ DEBUG: No 'includes' attribute in tweet_data")
+        
         return []
-    except:
+    except Exception as e:
+        st.error(f"❌ DEBUG ERROR fetching media: {str(e)}")
         return []
-
-def display_tweet_media(media_list):
-    """Display media inline like Twitter"""
-    if not media_list:
-        return
-    
-    for media in media_list:
-        try:
-            if media.type == 'photo':
-                if hasattr(media, 'url') and media.url:
-                    st.markdown('<div class="tweet-media">', unsafe_allow_html=True)
-                    st.image(media.url, use_container_width=True)
-                    st.markdown('</div>', unsafe_allow_html=True)
-            elif media.type in ['video', 'animated_gif']:
-                if hasattr(media, 'preview_image_url') and media.preview_image_url:
-                    st.markdown('<div class="tweet-media">', unsafe_allow_html=True)
-                    st.image(media.preview_image_url, use_container_width=True, caption="▶️ Video (click Twitter link to watch)")
-                    st.markdown('</div>', unsafe_allow_html=True)
-        except:
-            pass
 
 def generate_rewrites(original_tweet):
     """Generate all 4 rewrite styles at once"""
@@ -244,173 +241,41 @@ if st.button("🔍 Scan for Viral Broncos & Nuggets Debates", use_container_widt
         if top_broncos or top_nuggets:
             st.success(f"✅ Found {len(top_broncos)} Broncos + {len(top_nuggets)} Nuggets debates!")
             
-            # Show TOP 3 Broncos picks
-            if len(top_broncos) >= 3:
-                st.markdown("### ⭐ TOP 3 BRONCOS PICKS")
-                for i, tweet in enumerate(top_broncos[:3]):
-                    tweet_url = f"https://twitter.com/{tweet['author']}/status/{tweet['id']}"
-                    
-                    st.markdown(f"""
-                    <div class="tweet-card top-pick">
-                        <span class="top-pick-badge">⭐ TOP PICK #{i+1}</span>
-                        <div class="tweet-header">
-                            <span class="priority-badge {tweet['priority']['color']}">{tweet['priority']['label']}</span>
-                            <strong>{tweet['author_name']}</strong> @{tweet['author']}
-                        </div>
-                        <div class="tweet-text">{tweet['text']}</div>
+            # Show just the FIRST tweet for debugging
+            if top_broncos:
+                st.markdown("### 🔍 DEBUG: SHOWING FIRST TWEET ONLY")
+                tweet = top_broncos[0]
+                tweet_url = f"https://twitter.com/{tweet['author']}/status/{tweet['id']}"
+                
+                st.markdown(f"""
+                <div class="tweet-card top-pick">
+                    <div class="tweet-header">
+                        <span class="priority-badge {tweet['priority']['color']}">{tweet['priority']['label']}</span>
+                        <strong>{tweet['author_name']}</strong> @{tweet['author']}
                     </div>
-                    """, unsafe_allow_html=True)
-                    
-                    # Fetch and display media inline
-                    media = fetch_tweet_media(tweet['id'])
-                    display_tweet_media(media)
-                    
-                    st.markdown(f"""
+                    <div class="tweet-text">{tweet['text']}</div>
                     <div class="tweet-metrics">
                         <span class="metric-high">💬 {tweet['replies']} replies</span>
                         <span class="metric-high">❤️ {tweet['likes']}</span>
                         <span class="metric-high">🔄 {tweet['retweets']}</span>
                     </div>
                     <a href="{tweet_url}" target="_blank" style="color: #1d9bf0; text-decoration: none;">🔗 View on Twitter →</a>
-                    """, unsafe_allow_html=True)
-                    
-                    with st.spinner("Generating rewrites in your voice..."):
-                        rewrites = generate_rewrites(tweet['text'])
-                    
-                    st.markdown("**✍️ Your Rewrites:**")
-                    
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        st.markdown(f"<div class='rewrite-preview'><strong>Default:</strong><br>{rewrites['Default']}</div>", unsafe_allow_html=True)
-                        if st.button("📋 Copy", key=f"copy_default_top{i}"):
-                            st.code(rewrites['Default'], language=None)
-                        
-                        st.markdown(f"<div class='rewrite-preview'><strong>Analytical:</strong><br>{rewrites['Analytical']}</div>", unsafe_allow_html=True)
-                        if st.button("📋 Copy", key=f"copy_analytical_top{i}"):
-                            st.code(rewrites['Analytical'], language=None)
-                    
-                    with col2:
-                        st.markdown(f"<div class='rewrite-preview'><strong>Controversial:</strong><br>{rewrites['Controversial']}</div>", unsafe_allow_html=True)
-                        if st.button("📋 Copy", key=f"copy_controversial_top{i}"):
-                            st.code(rewrites['Controversial'], language=None)
-                        
-                        st.markdown(f"<div class='rewrite-preview'><strong>Personal:</strong><br>{rewrites['Personal']}</div>", unsafe_allow_html=True)
-                        if st.button("📋 Copy", key=f"copy_personal_top{i}"):
-                            st.code(rewrites['Personal'], language=None)
-                    
-                    st.markdown("---")
-            
-            # Show remaining Broncos tweets
-            if len(top_broncos) > 3:
-                st.markdown("### 🏈 OTHER BRONCOS TWEETS")
-                for idx, tweet in enumerate(top_broncos[3:], start=3):
-                    tweet_url = f"https://twitter.com/{tweet['author']}/status/{tweet['id']}"
-                    
-                    st.markdown(f"""
-                    <div class="tweet-card">
-                        <div class="tweet-header">
-                            <span class="priority-badge {tweet['priority']['color']}">{tweet['priority']['label']}</span>
-                            <strong>{tweet['author_name']}</strong> @{tweet['author']}
-                        </div>
-                        <div class="tweet-text">{tweet['text']}</div>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
-                    # Fetch and display media inline
-                    media = fetch_tweet_media(tweet['id'])
-                    display_tweet_media(media)
-                    
-                    st.markdown(f"""
-                    <div class="tweet-metrics">
-                        <span class="metric-high">💬 {tweet['replies']} replies</span>
-                        <span>❤️ {tweet['likes']}</span>
-                        <span>🔄 {tweet['retweets']}</span>
-                    </div>
-                    <a href="{tweet_url}" target="_blank" style="color: #1d9bf0; text-decoration: none;">🔗 View on Twitter →</a>
-                    """, unsafe_allow_html=True)
-                    
-                    with st.spinner("Generating rewrites in your voice..."):
-                        rewrites = generate_rewrites(tweet['text'])
-                    
-                    st.markdown("**✍️ Your Rewrites:**")
-                    
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        st.markdown(f"<div class='rewrite-preview'><strong>Default:</strong><br>{rewrites['Default']}</div>", unsafe_allow_html=True)
-                        if st.button("📋 Copy", key=f"copy_default_b{idx}"):
-                            st.code(rewrites['Default'], language=None)
-                        
-                        st.markdown(f"<div class='rewrite-preview'><strong>Analytical:</strong><br>{rewrites['Analytical']}</div>", unsafe_allow_html=True)
-                        if st.button("📋 Copy", key=f"copy_analytical_b{idx}"):
-                            st.code(rewrites['Analytical'], language=None)
-                    
-                    with col2:
-                        st.markdown(f"<div class='rewrite-preview'><strong>Controversial:</strong><br>{rewrites['Controversial']}</div>", unsafe_allow_html=True)
-                        if st.button("📋 Copy", key=f"copy_controversial_b{idx}"):
-                            st.code(rewrites['Controversial'], language=None)
-                        
-                        st.markdown(f"<div class='rewrite-preview'><strong>Personal:</strong><br>{rewrites['Personal']}</div>", unsafe_allow_html=True)
-                        if st.button("📋 Copy", key=f"copy_personal_b{idx}"):
-                            st.code(rewrites['Personal'], language=None)
-                    
-                    st.markdown("---")
-            
-            # Show Nuggets tweets
-            if top_nuggets:
-                st.markdown("### 🏀 NUGGETS TWEETS")
-                for idx, tweet in enumerate(top_nuggets):
-                    tweet_url = f"https://twitter.com/{tweet['author']}/status/{tweet['id']}"
-                    
-                    st.markdown(f"""
-                    <div class="tweet-card">
-                        <div class="tweet-header">
-                            <span class="priority-badge" style="background-color: #fdb927; color: #00285e;">🏀 NUGGETS</span>
-                            <strong>{tweet['author_name']}</strong> @{tweet['author']}
-                        </div>
-                        <div class="tweet-text">{tweet['text']}</div>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
-                    # Fetch and display media inline
-                    media = fetch_tweet_media(tweet['id'])
-                    display_tweet_media(media)
-                    
-                    st.markdown(f"""
-                    <div class="tweet-metrics">
-                        <span class="metric-high">💬 {tweet['replies']} replies</span>
-                        <span>❤️ {tweet['likes']}</span>
-                        <span>🔄 {tweet['retweets']}</span>
-                    </div>
-                    <a href="{tweet_url}" target="_blank" style="color: #1d9bf0; text-decoration: none;">🔗 View on Twitter →</a>
-                    """, unsafe_allow_html=True)
-                    
-                    with st.spinner("Generating rewrites in your voice..."):
-                        rewrites = generate_rewrites(tweet['text'])
-                    
-                    st.markdown("**✍️ Your Rewrites:**")
-                    
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        st.markdown(f"<div class='rewrite-preview'><strong>Default:</strong><br>{rewrites['Default']}</div>", unsafe_allow_html=True)
-                        if st.button("📋 Copy", key=f"copy_default_n{idx}"):
-                            st.code(rewrites['Default'], language=None)
-                        
-                        st.markdown(f"<div class='rewrite-preview'><strong>Analytical:</strong><br>{rewrites['Analytical']}</div>", unsafe_allow_html=True)
-                        if st.button("📋 Copy", key=f"copy_analytical_n{idx}"):
-                            st.code(rewrites['Analytical'], language=None)
-                    
-                    with col2:
-                        st.markdown(f"<div class='rewrite-preview'><strong>Controversial:</strong><br>{rewrites['Controversial']}</div>", unsafe_allow_html=True)
-                        if st.button("📋 Copy", key=f"copy_controversial_n{idx}"):
-                            st.code(rewrites['Controversial'], language=None)
-                        
-                        st.markdown(f"<div class='rewrite-preview'><strong>Personal:</strong><br>{rewrites['Personal']}</div>", unsafe_allow_html=True)
-                        if st.button("📋 Copy", key=f"copy_personal_n{idx}"):
-                            st.code(rewrites['Personal'], language=None)
-                    
-                    st.markdown("---")
+                </div>
+                """, unsafe_allow_html=True)
+                
+                # DEBUG: Try to fetch media
+                st.markdown("---")
+                st.markdown("### 📸 MEDIA FETCH DEBUG:")
+                media = fetch_tweet_media(tweet['id'])
+                
+                if media:
+                    st.success(f"✅ Media found! Attempting to display {len(media)} items...")
+                    for m in media:
+                        if m.type == 'photo' and hasattr(m, 'url'):
+                            st.image(m.url, use_container_width=True)
+                        elif m.type in ['video', 'animated_gif'] and hasattr(m, 'preview_image_url'):
+                            st.image(m.preview_image_url, use_container_width=True)
+                else:
+                    st.warning("No media found for this tweet")
         else:
             st.warning("No tweets found. Try again in a few moments!")
