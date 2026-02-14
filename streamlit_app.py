@@ -16,6 +16,8 @@ st.markdown("""
         border-radius: 20px;
         border: none;
         font-weight: bold;
+        padding: 12px 24px;
+        font-size: 16px;
     }
     .tweet-card {
         background-color: #16181c;
@@ -43,14 +45,6 @@ st.markdown("""
         margin: 12px 0;
     }
     .metric-high { color: #f91880; font-weight: bold; }
-    .tweet-link {
-        color: #1d9bf0;
-        text-decoration: none;
-        font-size: 13px;
-    }
-    .tweet-link:hover {
-        text-decoration: underline;
-    }
     .rewrite-preview {
         background-color: #1c1f23;
         border-left: 3px solid #1d9bf0;
@@ -95,7 +89,7 @@ def determine_priority(tweet_text):
         return {"rank": 3, "label": "🏈 BRONCOS", "color": "broncos", "priority": 100000}
 
 def search_viral_tweets(keywords, hours=48):
-    """Search for viral tweets with media"""
+    """Search for viral tweets"""
     query = " OR ".join([f'"{k}"' for k in keywords]) + " -is:retweet lang:en"
     start_time = datetime.utcnow() - timedelta(hours=hours)
     
@@ -105,38 +99,24 @@ def search_viral_tweets(keywords, hours=48):
             max_results=100,
             start_time=start_time,
             tweet_fields=['public_metrics', 'created_at'],
-            expansions=['author_id', 'attachments.media_keys'],
-            user_fields=['username', 'name'],
-            media_fields=['url', 'preview_image_url', 'type']
+            expansions=['author_id'],
+            user_fields=['username', 'name']
         )
         
         if not tweets.data:
             return []
         
         users = {user.id: user for user in tweets.includes['users']}
-        
-        # Get media if it exists
-        media_dict = {}
-        if tweets.includes and 'media' in tweets.includes:
-            media_dict = {media.media_key: media for media in tweets.includes['media']}
-        
         scored_tweets = []
         
         for tweet in tweets.data:
             metrics = tweet.public_metrics
             priority_info = determine_priority(tweet.text)
             
-            # Prioritize by replies first (controversy)
+            # Prioritize by replies first (controversy), then add priority boost
             engagement_score = (metrics['reply_count'] * 1000) + priority_info['priority']
             
             user = users.get(tweet.author_id)
-            
-            # Get media for this tweet
-            tweet_media = []
-            if hasattr(tweet, 'attachments') and tweet.attachments and 'media_keys' in tweet.attachments:
-                for media_key in tweet.attachments['media_keys']:
-                    if media_key in media_dict:
-                        tweet_media.append(media_dict[media_key])
             
             scored_tweets.append({
                 'id': tweet.id,
@@ -149,8 +129,7 @@ def search_viral_tweets(keywords, hours=48):
                 'replies': metrics['reply_count'],
                 'impressions': metrics.get('impression_count', 0),
                 'engagement_score': engagement_score,
-                'priority': priority_info,
-                'media': tweet_media
+                'priority': priority_info
             })
         
         scored_tweets.sort(key=lambda x: x['engagement_score'], reverse=True)
@@ -204,7 +183,6 @@ if st.button("🔍 Scan for Viral Broncos Debates", use_container_width=True):
             for tweet in tweets:
                 # Tweet card with clickable link
                 tweet_url = f"https://twitter.com/{tweet['author']}/status/{tweet['id']}"
-                
                 st.markdown(f"""
                 <div class="tweet-card">
                     <div class="tweet-header">
@@ -217,29 +195,29 @@ if st.button("🔍 Scan for Viral Broncos Debates", use_container_width=True):
                         <span>❤️ {tweet['likes']}</span>
                         <span>🔄 {tweet['retweets']}</span>
                     </div>
-                    <a href="{tweet_url}" target="_blank" class="tweet-link">🔗 View on Twitter</a>
+                    <a href="{tweet_url}" target="_blank" style="color: #1d9bf0; text-decoration: none;">🔗 View on Twitter →</a>
                 </div>
                 """, unsafe_allow_html=True)
                 
                 # Show images/videos if attached
-try:
-    tweet_details = client_twitter.get_tweet(
-        tweet['id'], 
-        expansions='attachments.media_keys', 
-        media_fields='url,preview_image_url,type,variants'
-    )
-    
-    if tweet_details.includes and 'media' in tweet_details.includes:
-        st.markdown("**📸 Media:**")
-        for media in tweet_details.includes['media']:
-            if media.type == 'photo':
-                if hasattr(media, 'url') and media.url:
-                    st.image(media.url, use_container_width=True)
-            elif media.type == 'video' or media.type == 'animated_gif':
-                if hasattr(media, 'preview_image_url') and media.preview_image_url:
-                    st.image(media.preview_image_url, caption="Video preview", use_container_width=True)
-except Exception as e:
-    pass  # Silently skip if media can't be loaded
+                try:
+                    tweet_details = client_twitter.get_tweet(
+                        tweet['id'], 
+                        expansions='attachments.media_keys', 
+                        media_fields='url,preview_image_url,type,variants'
+                    )
+                    
+                    if tweet_details.includes and 'media' in tweet_details.includes:
+                        st.markdown("**📸 Media:**")
+                        for media in tweet_details.includes['media']:
+                            if media.type == 'photo':
+                                if hasattr(media, 'url') and media.url:
+                                    st.image(media.url, use_container_width=True)
+                            elif media.type == 'video' or media.type == 'animated_gif':
+                                if hasattr(media, 'preview_image_url') and media.preview_image_url:
+                                    st.image(media.preview_image_url, caption="Video preview", use_container_width=True)
+                except:
+                    pass
                 
                 # Generate all 4 rewrites
                 with st.spinner("Generating rewrites in your voice..."):
@@ -261,4 +239,3 @@ except Exception as e:
                 st.markdown("---")
         else:
             st.warning("No tweets found. Try again in a few moments!")
-
