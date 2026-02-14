@@ -222,13 +222,24 @@ if st.button("🔍 Scan for Viral Broncos Debates", use_container_width=True):
                 """, unsafe_allow_html=True)
                 
                 # Show images/videos if attached
-                if tweet['media']:
-                    st.markdown("**📸 Media:**")
-                    for media in tweet['media']:
-                        if media.type == 'photo' and hasattr(media, 'url'):
-                            st.image(media.url, use_container_width=True)
-                        elif media.type in ['video', 'animated_gif'] and hasattr(media, 'preview_image_url'):
-                            st.image(media.preview_image_url, caption="Video preview (click Twitter link to watch)", use_container_width=True)
+try:
+    tweet_details = client_twitter.get_tweet(
+        tweet['id'], 
+        expansions='attachments.media_keys', 
+        media_fields='url,preview_image_url,type,variants'
+    )
+    
+    if tweet_details.includes and 'media' in tweet_details.includes:
+        st.markdown("**📸 Media:**")
+        for media in tweet_details.includes['media']:
+            if media.type == 'photo':
+                if hasattr(media, 'url') and media.url:
+                    st.image(media.url, use_container_width=True)
+            elif media.type == 'video' or media.type == 'animated_gif':
+                if hasattr(media, 'preview_image_url') and media.preview_image_url:
+                    st.image(media.preview_image_url, caption="Video preview", use_container_width=True)
+except Exception as e:
+    pass  # Silently skip if media can't be loaded
                 
                 # Generate all 4 rewrites
                 with st.spinner("Generating rewrites in your voice..."):
@@ -250,3 +261,4 @@ if st.button("🔍 Scan for Viral Broncos Debates", use_container_width=True):
                 st.markdown("---")
         else:
             st.warning("No tweets found. Try again in a few moments!")
+
