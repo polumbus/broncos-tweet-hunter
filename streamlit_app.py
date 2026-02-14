@@ -1,12 +1,14 @@
+python
 import streamlit as st
 import os
 import tweepy
 from anthropic import Anthropic
 from datetime import datetime, timedelta
+import json
 
-st.set_page_config(page_title="Broncos Tweet Hunter", layout="wide")
+st.set_page_config(page_title="Broncos Tweet Hunter", layout="wide", initial_sidebar_state="collapsed")
 
-# Read from Streamlit secrets and set as environment variables
+# Set environment variables
 os.environ["TWITTER_BEARER_TOKEN"] = st.secrets["TWITTER_BEARER_TOKEN"]
 os.environ["ANTHROPIC_API_KEY"] = st.secrets["ANTHROPIC_API_KEY"]
 
@@ -14,175 +16,307 @@ os.environ["ANTHROPIC_API_KEY"] = st.secrets["ANTHROPIC_API_KEY"]
 client = Anthropic()
 client_twitter = tweepy.Client(bearer_token=os.environ["TWITTER_BEARER_TOKEN"], wait_on_rate_limit=True)
 
-st.title("🏈 BRONCOS TWEET HUNTER")
-st.write("Find viral Broncos & Nuggets content from the last 48 hours")
+# Custom CSS for Twitter-like appearance
+st.markdown("""
+<style>
+* {
+font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+}
 
-# Sidebar
-st.sidebar.header("⚙️ Settings")
-search_mode = st.sidebar.radio("Search for:", ["Broncos Only (85%)", "Broncos + Nuggets (85/15)"])
+.tweet-card {
+border: 1px solid #e1e8ed;
+border-radius: 16px;
+padding: 16px;
+margin: 12px 0;
+background: white;
+transition: background-color 0.2s;
+}
+
+.tweet-card:hover {
+background-color: #f7f9fa;
+}
+
+.tweet-header {
+display: flex;
+justify-content: space-between;
+align-items: center;
+margin-bottom: 12px;
+}
+
+.tweet-author {
+font-weight: 700;
+color: #0f1419;
+font-size: 15px;
+}
+
+.tweet-handle {
+color: #536471;
+font-size: 15px;
+}
+
+.tweet-text {
+color: #0f1419;
+font-size: 15px;
+line-height: 1.5;
+margin: 12px 0;
+word-wrap: break-word;
+}
+
+.tweet-metrics {
+display: flex;
+gap: 16px;
+color: #536471;
+font-size: 13px;
+margin: 12px 0;
+padding: 12px 0;
+border-top: 1px solid #e1e8ed;
+border-bottom: 1px solid #e1e8ed;
+}
+
+.metric-item {
+display: flex;
+gap: 4px;
+}
+
+.metric-number {
+font-weight: 700;
+color: #0f1419;
+}
+
+.ranking-badge {
+display: inline-block;
+padding: 4px 12px;
+border-radius: 20px;
+font-size: 12px;
+font-weight: 700;
+margin-bottom: 8px;
+}
+
+.rank-bo-nix {
+background-color: #ffe0e6;
+color: #c91c1c;
+}
+
+.rank-payton {
+background-color: #fff3cd;
+color: #ff6b35;
+}
+
+.rank-other {
+background-color: #e3f2fd;
+color: #1976d2;
+}
+
+.rewrite-section {
+background-color: #f7f9fa;
+border-radius: 16px;
+padding: 16px;
+margin-top: 12px;
+}
+
+.action-buttons {
+display: flex;
+gap: 8px;
+margin-top: 12px;
+flex-wrap: wrap;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# Page title
+st.markdown("# 🏈 BRONCOS TWEET HUNTER")
+st.markdown("*Find trending Broncos discussion → Rewrite or generate → Post to your audience*")
+
+# Quick stats
+col1, col2, col3 = st.columns(3)
+col1.metric("⏱️ Time to scan", "2-3 min")
+col2.metric("📊 Tweets found", "10-15")
+col3.metric("🚀 Ready to post", "Instantly")
+
+st.markdown("---")
+
+# RANKING SYSTEM
+def get_ranking(text):
+"""Determine ranking priority based on content"""
+text_lower = text.lower()
+
+bo_nix_keywords = ["bo nix", "bo nicks", "nix", "quarterback", "qb"]
+payton_keywords = ["sean payton", "payton", "coach", "coaching decision", "offense"]
+
+bo_mentions = sum(1 for keyword in bo_nix_keywords if keyword in text_lower)
+payton_mentions = sum(1 for keyword in payton_keywords if keyword in text_lower)
+
+if bo_mentions > 0:
+return {"rank": 1, "label": "🔥 BO NIX", "color": "rank-bo-nix", "priority": 1000000}
+elif payton_mentions > 0:
+return {"rank": 2, "label": "⚡ SEAN PAYTON", "color": "rank-payton", "priority": 100000}
+else:
+return {"rank": 3, "label": "🏈 BRONCOS", "color": "rank-other", "priority": 10000}
 
 def search_viral_tweets(keywords, max_results=50):
-    """Search Twitter for viral tweets"""
-    query = " OR ".join([f'"{k}"' for k in keywords]) + " -is:retweet lang:en"
-    start_time = datetime.utcnow() - timedelta(hours=48)
-    
-    try:
-        tweets = client_twitter.search_recent_tweets(
-            query=query,
-            max_results=max_results,
-            start_time=start_time,
-            tweet_fields=['public_metrics', 'created_at', 'author_id'],
-            expansions=['author_id'],
-            user_fields=['username', 'name']
-        )
-        
-        if not tweets.data:
-            return []
-        
-        # Get user info
-        users = {user.id: user for user in tweets.includes['users']}
-        
-        # Score tweets (replies weighted 3x for controversy)
-        scored_tweets = []
-        for tweet in tweets.data:
-            metrics = tweet.public_metrics
-            engagement_score = (metrics['reply_count'] * 3) + (metrics['retweet_count'] * 2) + metrics['like_count']
-            user = users.get(tweet.author_id)
-            
-            scored_tweets.append({
-                'id': tweet.id,
-                'text': tweet.text,
-                'author': user.username if user else 'Unknown',
-                'author_name': user.name if user else 'Unknown',
-                'created_at': tweet.created_at,
-                'likes': metrics['like_count'],
-                'retweets': metrics['retweet_count'],
-                'replies': metrics['reply_count'],
-                'engagement_score': engagement_score,
-                'url': f"https://twitter.com/{user.username if user else 'twitter'}/status/{tweet.id}"
-            })
-        
-        # Sort by engagement score
-        scored_tweets.sort(key=lambda x: x['engagement_score'], reverse=True)
-        return scored_tweets[:10]
-    
-    except Exception as e:
-        st.error(f"Twitter API Error: {str(e)}")
-        return []
+"""Search Twitter for viral tweets - prioritize by REPLIES"""
+query = " OR ".join([f'"{k}"' for k in keywords]) + " -is:retweet lang:en"
+start_time = datetime.utcnow() - timedelta(hours=48)
 
-def rewrite_tweet(original_text, style="default"):
-    """Rewrite tweet in Tyler's voice"""
-    
-    voice_profile = """You are Tyler, a Denver Broncos analyst and former player. Your voice:
-- Insider perspective (you know team dynamics from playing)
-- Conversational and smart (not generic hot takes)
-- Mix analysis with personality
-- Ask rhetorical questions to engage
-- Short, punchy paragraphs
-- Willing to have spicy takes
-- Examples: 'Bo's presser was a DIRECT RESPONSE to Sean', 'It's Walmart money!'"""
-    
-    style_prompts = {
-        "default": "Rewrite this tweet in Tyler's voice. Keep it under 280 characters.",
-        "analytical": "Rewrite as deep analysis from Tyler (former player). Break down strategy/implications. Under 280 chars.",
-        "controversial": "Rewrite as a spicy hot take from Tyler. Make it debate-worthy. Under 280 chars.",
-        "personal": "Rewrite from Tyler's experience as a former player. Reference locker room insights. Under 280 chars."
-    }
-    
-    prompt = f"""{voice_profile}
+try:
+tweets = client_twitter.search_recent_tweets(
+query=query,
+max_results=max_results,
+start_time=start_time,
+tweet_fields=['public_metrics', 'created_at', 'author_id'],
+expansions=['author_id'],
+user_fields=['username', 'name', 'profile_image_url']
+)
 
-Original tweet: "{original_text}"
+if not tweets.data:
+return []
 
-{style_prompts.get(style, style_prompts['default'])}"""
-    
-    try:
-        message = client.messages.create(
-            model="claude-3-5-sonnet-20241022",
-            max_tokens=300,
-            messages=[{"role": "user", "content": prompt}]
-        )
-        return message.content[0].text
-    except Exception as e:
-        return f"Error: {str(e)}"
+users = {user.id: user for user in tweets.includes['users']}
+scored_tweets = []
 
-# Main interface
-if st.button("🔍 SCAN FOR VIRAL TWEETS (LAST 48 HOURS)", use_container_width=True):
-    with st.spinner("🏈 Searching Twitter for viral Broncos content..."):
-        
-        if search_mode == "Broncos Only (85%)":
-            keywords = ["Denver Broncos", "Sean Payton", "Bo Nix", "#Broncos"]
-        else:
-            # 85% Broncos, 15% Nuggets
-            broncos_tweets = search_viral_tweets(["Denver Broncos", "Sean Payton", "Bo Nix"], max_results=40)
-            nuggets_tweets = search_viral_tweets(["Denver Nuggets", "Nikola Jokic"], max_results=7)
-            tweets = broncos_tweets + nuggets_tweets
-            tweets.sort(key=lambda x: x['engagement_score'], reverse=True)
-            tweets = tweets[:10]
-        
-        if search_mode == "Broncos Only (85%)":
-            tweets = search_viral_tweets(keywords)
-        
-        if tweets:
-            st.success(f"✅ Found {len(tweets)} viral tweets!")
-            
-            for i, tweet in enumerate(tweets, 1):
-                st.markdown("---")
-                
-                # Tweet header
-                col1, col2 = st.columns([4, 1])
-                with col1:
-                    st.markdown(f"### #{i} - @{tweet['author']} ({tweet['author_name']})")
-                with col2:
-                    team_badge = "🏈 BRONCOS" if i <= 9 or search_mode == "Broncos Only (85%)" else "🏀 NUGGETS"
-                    st.markdown(f"**{team_badge}**")
-                
-                # Engagement metrics
-                col1, col2, col3, col4 = st.columns(4)
-                col1.metric("❤️ Likes", f"{tweet['likes']:,}")
-                col2.metric("🔄 Retweets", f"{tweet['retweets']:,}")
-                col3.metric("💬 Replies", f"{tweet['replies']:,}")
-                col4.metric("🔥 Score", f"{tweet['engagement_score']:,}")
-                
-                # Original tweet
-                st.markdown("#### 📱 Original Tweet")
-                st.info(tweet['text'])
-                st.markdown(f"[View on Twitter]({tweet['url']}) • Posted {tweet['created_at'].strftime('%b %d, %Y at %I:%M %p UTC')}")
-                
-                # AI Rewrites
-                st.markdown("#### 🤖 AI Rewrites in Your Voice")
-                
-                tab1, tab2, tab3, tab4 = st.tabs(["✍️ Default", "📊 Analytical", "🔥 Controversial", "👤 Personal"])
-                
-                with tab1:
-                    if st.button(f"Generate Default Rewrite", key=f"default_{tweet['id']}"):
-                        with st.spinner("Rewriting..."):
-                            rewrite = rewrite_tweet(tweet['text'], "default")
-                            st.success(rewrite)
-                            st.code(rewrite, language=None)
-                
-                with tab2:
-                    if st.button(f"Generate Analytical Rewrite", key=f"analytical_{tweet['id']}"):
-                        with st.spinner("Rewriting..."):
-                            rewrite = rewrite_tweet(tweet['text'], "analytical")
-                            st.success(rewrite)
-                            st.code(rewrite, language=None)
-                
-                with tab3:
-                    if st.button(f"Generate Controversial Rewrite", key=f"controversial_{tweet['id']}"):
-                        with st.spinner("Rewriting..."):
-                            rewrite = rewrite_tweet(tweet['text'], "controversial")
-                            st.success(rewrite)
-                            st.code(rewrite, language=None)
-                
-                with tab4:
-                    if st.button(f"Generate Personal Rewrite", key=f"personal_{tweet['id']}"):
-                        with st.spinner("Rewriting..."):
-                            rewrite = rewrite_tweet(tweet['text'], "personal")
-                            st.success(rewrite)
-                            st.code(rewrite, language=None)
-        else:
-            st.warning("No tweets found. Try again in a few moments!")
+for tweet in tweets.data:
+metrics = tweet.public_metrics
+ranking = get_ranking(tweet.text)
 
-# Footer
+# PRIORITY: Replies first, then impressions
+engagement_score = (metrics['reply_count'] * 1000) + metrics['impression_count']
+
+scored_tweets.append({
+'id': tweet.id,
+'text': tweet.text,
+'author': user.username if user else 'Unknown',
+'author_name': user.name if user else 'Unknown',
+'created_at': tweet.created_at,
+'likes': metrics['like_count'],
+'retweets': metrics['retweet_count'],
+'replies': metrics['reply_count'],
+'impressions': metrics['impression_count'],
+'engagement_score': engagement_score,
+'ranking': ranking,
+'url': f"https://twitter.com/{user.username if user else 'twitter'}/status/{tweet.id}"
+})
+
+# Sort by ranking priority, then by reply count (replies weighted heaviest)
+scored_tweets.sort(key=lambda x: (x['ranking']['priority'], -x['replies']), reverse=True)
+return scored_tweets[:15]
+
+except Exception as e:
+st.error(f"Error: {str(e)}")
+return []
+
+def rewrite_tweet(text, style="rewrite"):
+"""Rewrite or generate new tweet"""
+
+voice = """You are Tyler, a Denver Broncos analyst and former player.
+Your voice: insider perspective, conversational but smart, mix analysis with personality,
+ask rhetorical questions, short punchy paragraphs, willing to have spicy takes."""
+
+if style == "rewrite":
+prompt = f"""{voice}
+
+Original tweet: "{text}"
+
+Rewrite this in your voice. Keep it under 280 characters. Preserve the core message but put it in your own words."""
+else:
+prompt = f"""{voice}
+
+Based on this topic: "{text}"
+
+Generate a completely NEW tweet take on this topic. Make it punchy, engaging, and something YOUR audience would want to retweet. Under 280 characters."""
+
+try:
+message = client.messages.create(
+model="claude-3-5-sonnet-20241022",
+max_tokens=300,
+messages=[{"role": "user", "content": prompt}]
+)
+return message.content[0].text
+except Exception as e:
+return f"Error: {str(e)}"
+
+# MAIN SCAN BUTTON
+if st.button("🔍 SCAN VIRAL BRONCOS TWEETS", use_container_width=True, key="scan_btn"):
+with st.spinner("Scanning Twitter for viral Broncos discussion..."):
+keywords = ["Denver Broncos", "Sean Payton", "Bo Nix", "Broncos drama"]
+tweets = search_viral_tweets(keywords)
+
+if tweets:
+st.success(f"✅ Found {len(tweets)} viral tweets | Sorted by replies")
+
+for i, tweet in enumerate(tweets, 1):
+with st.container():
+st.markdown(f"""
+<div class="tweet-card">
+<div class="ranking-badge {tweet['ranking']['color']}">{tweet['ranking']['label']}</div>
+<div class="tweet-header">
+<div>
+<span class="tweet-author">@{tweet['author']}</span>
+<span class="tweet-handle">@{tweet['author']}</span>
+</div>
+<span style="color: #536471; font-size: 13px;">{tweet['created_at'].strftime('%b %d')}</span>
+</div>
+<div class="tweet-text">{tweet['text']}</div>
+<div class="tweet-metrics">
+<div class="metric-item"><span class="metric-number">{tweet['replies']:,}</span> Replies</div>
+<div class="metric-item"><span class="metric-number">{tweet['retweets']:,}</span> Retweets</div>
+<div class="metric-item"><span class="metric-number">{tweet['likes']:,}</span> Likes</div>
+<div class="metric-item"><span class="metric-number">{tweet['impressions']:,}</span> Impressions</div>
+</div>
+</div>
+""", unsafe_allow_html=True)
+
+# Options
+opt1, opt2 = st.columns(2)
+
+with opt1:
+if st.button(f"✏️ Rewrite this tweet", key=f"rewrite_{tweet['id']}"):
+rewrite = rewrite_tweet(tweet['text'], "rewrite")
+st.session_state[f"rewrite_{tweet['id']}"] = rewrite
+
+with opt2:
+if st.button(f"💡 Generate new take", key=f"generate_{tweet['id']}"):
+generated = rewrite_tweet(tweet['text'], "generate")
+st.session_state[f"generate_{tweet['id']}"] = generated
+
+# Show previews if generated
+if f"rewrite_{tweet['id']}" in st.session_state:
+rewrite_text = st.session_state[f"rewrite_{tweet['id']}"]
+st.markdown(f"""
+<div class="rewrite-section">
+<strong>📝 Your Rewrite:</strong><br>
+{rewrite_text}
+</div>
+""", unsafe_allow_html=True)
+
+edited = st.text_area(f"Edit before posting:", value=rewrite_text, key=f"edit_rewrite_{tweet['id']}")
+
+col1, col2 = st.columns(2)
+with col1:
+if st.button(f"📤 Post now", key=f"post_now_{tweet['id']}"):
+st.success(f"✅ Would post: {edited[:50]}...")
+with col2:
+if st.button(f"⏰ Schedule for later", key=f"schedule_{tweet['id']}"):
+st.info(f"📅 Ready to schedule: {edited[:50]}...")
+
+if f"generate_{tweet['id']}" in st.session_state:
+gen_text = st.session_state[f"generate_{tweet['id']}"]
+st.markdown(f"""
+<div class="rewrite-section">
+<strong>💡 Generated Take:</strong><br>
+{gen_text}
+</div>
+""", unsafe_allow_html=True)
+
+edited = st.text_area(f"Edit before posting:", value=gen_text, key=f"edit_gen_{tweet['id']}")
+
+col1, col2 = st.columns(2)
+with col1:
+if st.button(f"📤 Post now", key=f"post_now_gen_{tweet['id']}"):
+st.success(f"✅ Would post: {edited[:50]}...")
+with col2:
+if st.button(f"⏰ Schedule for later", key=f"schedule_gen_{tweet['id']}"):
+st.info(f"📅 Ready to schedule: {edited[:50]}...")
+
 st.markdown("---")
-st.caption("💰 **Cost Tracking:** Twitter API (Free tier) | Claude API (~$0.50 per scan)")
+else:
+st.warning("No tweets found. Try again!")
