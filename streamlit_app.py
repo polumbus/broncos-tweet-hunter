@@ -86,16 +86,6 @@ st.markdown("""
     .bo-nix { background-color: #ff4500; color: white; }
     .sean-payton { background-color: #ff8c00; color: white; }
     .broncos { background-color: #fb4f14; color: white; }
-    
-    /* TWEET MEDIA STYLING - SMALLER SIZE */
-    .stImage {
-        margin: 12px 0;
-    }
-    .stImage > img {
-        max-width: 400px !important;
-        width: 100% !important;
-        border-radius: 12px;
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -210,21 +200,47 @@ def fetch_tweet_media(tweet_id):
     except:
         return []
 
-def display_tweet_media(media_list):
-    """Display media inline - SMALLER SIZE"""
-    if not media_list:
-        return
+def display_tweet_card(tweet, is_top_pick=False, pick_number=None):
+    """Display a complete tweet card with media inside"""
+    tweet_url = f"https://twitter.com/{tweet['author']}/status/{tweet['id']}"
+    card_class = "tweet-card top-pick" if is_top_pick else "tweet-card"
     
-    for media in media_list:
-        try:
-            if media.type == 'photo':
-                if hasattr(media, 'url') and media.url:
-                    st.image(media.url, width=400)  # Fixed width of 400px
-            elif media.type in ['video', 'animated_gif']:
-                if hasattr(media, 'preview_image_url') and media.preview_image_url:
-                    st.image(media.preview_image_url, caption="▶️ Video", width=400)  # Fixed width
-        except Exception as e:
-            pass
+    # Start the card
+    top_badge = f'<span class="top-pick-badge">⭐ TOP PICK #{pick_number}</span>' if is_top_pick else ''
+    
+    st.markdown(f"""
+    <div class="{card_class}">
+        {top_badge}
+        <div class="tweet-header">
+            <span class="priority-badge {tweet['priority']['color']}">{tweet['priority']['label']}</span>
+            <strong>{tweet['author_name']}</strong> @{tweet['author']}
+        </div>
+        <div class="tweet-text">{tweet['text']}</div>
+    """, unsafe_allow_html=True)
+    
+    # Display media INSIDE the card (Streamlit renders it here)
+    media = fetch_tweet_media(tweet['id'])
+    if media:
+        for m in media:
+            try:
+                if m.type == 'photo' and hasattr(m, 'url') and m.url:
+                    st.image(m.url, width=400)
+                elif m.type in ['video', 'animated_gif'] and hasattr(m, 'preview_image_url') and m.preview_image_url:
+                    st.image(m.preview_image_url, caption="▶️ Video", width=400)
+            except:
+                pass
+    
+    # Close the card with metrics
+    metrics_class = "metric-high" if is_top_pick else ""
+    st.markdown(f"""
+        <div class="tweet-metrics">
+            <span class="{metrics_class}">💬 {tweet['replies']} replies</span>
+            <span class="{metrics_class if is_top_pick else ''}">❤️ {tweet['likes']}</span>
+            <span class="{metrics_class if is_top_pick else ''}">🔄 {tweet['retweets']}</span>
+        </div>
+        <a href="{tweet_url}" target="_blank" style="color: #1d9bf0; text-decoration: none;">🔗 View on Twitter →</a>
+    </div>
+    """, unsafe_allow_html=True)
 
 def generate_rewrites(original_tweet):
     """Generate all 4 rewrite styles at once"""
@@ -286,31 +302,7 @@ if st.button("🔍 Scan for Viral Broncos & Nuggets Debates", use_container_widt
             if len(top_broncos) >= 3:
                 st.markdown("### ⭐ TOP 3 BRONCOS PICKS")
                 for i, tweet in enumerate(top_broncos[:3]):
-                    tweet_url = f"https://twitter.com/{tweet['author']}/status/{tweet['id']}"
-                    
-                    st.markdown(f"""
-                    <div class="tweet-card top-pick">
-                        <span class="top-pick-badge">⭐ TOP PICK #{i+1}</span>
-                        <div class="tweet-header">
-                            <span class="priority-badge {tweet['priority']['color']}">{tweet['priority']['label']}</span>
-                            <strong>{tweet['author_name']}</strong> @{tweet['author']}
-                        </div>
-                        <div class="tweet-text">{tweet['text']}</div>
-                    """, unsafe_allow_html=True)
-                    
-                    # Fetch and display media INSIDE card
-                    media = fetch_tweet_media(tweet['id'])
-                    display_tweet_media(media)
-                    
-                    st.markdown(f"""
-                        <div class="tweet-metrics">
-                            <span class="metric-high">💬 {tweet['replies']} replies</span>
-                            <span class="metric-high">❤️ {tweet['likes']}</span>
-                            <span class="metric-high">🔄 {tweet['retweets']}</span>
-                        </div>
-                        <a href="{tweet_url}" target="_blank" style="color: #1d9bf0; text-decoration: none;">🔗 View on Twitter →</a>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    display_tweet_card(tweet, is_top_pick=True, pick_number=i+1)
                     
                     with st.spinner("Generating rewrites in your voice..."):
                         rewrites = generate_rewrites(tweet['text'])
@@ -343,29 +335,7 @@ if st.button("🔍 Scan for Viral Broncos & Nuggets Debates", use_container_widt
             if len(top_broncos) > 3:
                 st.markdown("### 🏈 OTHER BRONCOS TWEETS")
                 for idx, tweet in enumerate(top_broncos[3:], start=3):
-                    tweet_url = f"https://twitter.com/{tweet['author']}/status/{tweet['id']}"
-                    
-                    st.markdown(f"""
-                    <div class="tweet-card">
-                        <div class="tweet-header">
-                            <span class="priority-badge {tweet['priority']['color']}">{tweet['priority']['label']}</span>
-                            <strong>{tweet['author_name']}</strong> @{tweet['author']}
-                        </div>
-                        <div class="tweet-text">{tweet['text']}</div>
-                    """, unsafe_allow_html=True)
-                    
-                    media = fetch_tweet_media(tweet['id'])
-                    display_tweet_media(media)
-                    
-                    st.markdown(f"""
-                        <div class="tweet-metrics">
-                            <span class="metric-high">💬 {tweet['replies']} replies</span>
-                            <span>❤️ {tweet['likes']}</span>
-                            <span>🔄 {tweet['retweets']}</span>
-                        </div>
-                        <a href="{tweet_url}" target="_blank" style="color: #1d9bf0; text-decoration: none;">🔗 View on Twitter →</a>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    display_tweet_card(tweet, is_top_pick=False)
                     
                     with st.spinner("Generating rewrites in your voice..."):
                         rewrites = generate_rewrites(tweet['text'])
@@ -398,6 +368,7 @@ if st.button("🔍 Scan for Viral Broncos & Nuggets Debates", use_container_widt
             if top_nuggets:
                 st.markdown("### 🏀 NUGGETS TWEETS")
                 for idx, tweet in enumerate(top_nuggets):
+                    # Special styling for Nuggets badge
                     tweet_url = f"https://twitter.com/{tweet['author']}/status/{tweet['id']}"
                     
                     st.markdown(f"""
@@ -410,7 +381,15 @@ if st.button("🔍 Scan for Viral Broncos & Nuggets Debates", use_container_widt
                     """, unsafe_allow_html=True)
                     
                     media = fetch_tweet_media(tweet['id'])
-                    display_tweet_media(media)
+                    if media:
+                        for m in media:
+                            try:
+                                if m.type == 'photo' and hasattr(m, 'url') and m.url:
+                                    st.image(m.url, width=400)
+                                elif m.type in ['video', 'animated_gif'] and hasattr(m, 'preview_image_url') and m.preview_image_url:
+                                    st.image(m.preview_image_url, caption="▶️ Video", width=400)
+                            except:
+                                pass
                     
                     st.markdown(f"""
                         <div class="tweet-metrics">
