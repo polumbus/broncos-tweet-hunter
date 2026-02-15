@@ -8,8 +8,8 @@ import os
 # TESTING MODE - CHANGE THIS
 # ========================================
 TESTING_MODE = True  # Set to False when ready for full scanning
-MAX_TWEETS = 20 if TESTING_MODE else 100  # 20 tweets in testing, 100 in production
-HOURS_BACK = 36  # Scan last 36 hours
+MAX_TWEETS = 20  # Always 20 tweets to save Twitter API credits
+HOURS_BACK = 168 if TESTING_MODE else 36  # 7 days for testing, 36 hours for production
 # ========================================
 
 st.set_page_config(page_title="Broncos Tweet Hunter", layout="wide", initial_sidebar_state="collapsed")
@@ -48,6 +48,13 @@ st.markdown("""
         line-height: 20px;
         color: #e7e9ea;
         margin-bottom: 12px;
+    }
+    .tweet-media {
+        margin: 12px 0;
+    }
+    .tweet-media img {
+        max-width: 300px;
+        border-radius: 12px;
     }
     .tweet-metrics {
         display: flex;
@@ -97,7 +104,7 @@ client_twitter = tweepy.Client(bearer_token=os.environ["TWITTER_BEARER_TOKEN"], 
 
 st.title("🏈 Broncos Tweet Hunter")
 if TESTING_MODE:
-    st.caption(f"⚠️ TESTING MODE: Fetching only {MAX_TWEETS} tweets to save credits")
+    st.caption(f"⚠️ TESTING MODE: Fetching {MAX_TWEETS} tweets from last {HOURS_BACK//24} days")
 else:
     st.caption(f"Find the most controversial Denver Broncos debates from the last {HOURS_BACK} hours")
 
@@ -124,12 +131,11 @@ def is_original_tweet(tweet):
     return True
 
 def search_viral_tweets(keywords, hours=None):
-    """Search for viral tweets - DENVER BRONCOS ONLY"""
+    """Search for viral tweets"""
     if hours is None:
         hours = HOURS_BACK
     
     query = " OR ".join([f'"{k}"' for k in keywords])
-    query += " -\"Western Michigan\" -\"Boise State\" -\"high school\" -\"HS\" -\"prep\" -\"college\" -\"university\""
     query += " -is:retweet -is:reply lang:en"
     
     start_time = datetime.utcnow() - timedelta(hours=hours)
@@ -200,47 +206,48 @@ def fetch_tweet_media(tweet_id):
     except:
         return []
 
-def display_tweet_card(tweet, is_top_pick=False, pick_number=None):
-    """Display a complete tweet card with media inside"""
+def render_tweet_card(tweet, is_top_pick=False, pick_number=None):
+    """Render a complete tweet card with media inside"""
     tweet_url = f"https://twitter.com/{tweet['author']}/status/{tweet['id']}"
+    
     card_class = "tweet-card top-pick" if is_top_pick else "tweet-card"
     
-    # Start the card
-    top_badge = f'<span class="top-pick-badge">⭐ TOP PICK #{pick_number}</span>' if is_top_pick else ''
+    html = f'<div class="{card_class}">'
     
-    st.markdown(f"""
-    <div class="{card_class}">
-        {top_badge}
+    if is_top_pick:
+        html += f'<span class="top-pick-badge">⭐ TOP PICK #{pick_number}</span>'
+    
+    html += f'''
         <div class="tweet-header">
             <span class="priority-badge {tweet['priority']['color']}">{tweet['priority']['label']}</span>
             <strong>{tweet['author_name']}</strong> @{tweet['author']}
         </div>
         <div class="tweet-text">{tweet['text']}</div>
-    """, unsafe_allow_html=True)
+    '''
     
-    # Display media INSIDE the card (Streamlit renders it here)
     media = fetch_tweet_media(tweet['id'])
     if media:
         for m in media:
             try:
                 if m.type == 'photo' and hasattr(m, 'url') and m.url:
-                    st.image(m.url, width=400)
+                    html += f'<div class="tweet-media"><img src="{m.url}" style="max-width: 300px; border-radius: 12px;"></div>'
                 elif m.type in ['video', 'animated_gif'] and hasattr(m, 'preview_image_url') and m.preview_image_url:
-                    st.image(m.preview_image_url, caption="▶️ Video", width=400)
+                    html += f'<div class="tweet-media"><img src="{m.preview_image_url}" style="max-width: 300px; border-radius: 12px;"><br><small>▶️ Video</small></div>'
             except:
                 pass
     
-    # Close the card with metrics
-    metrics_class = "metric-high" if is_top_pick else ""
-    st.markdown(f"""
+    metric_class = "metric-high" if is_top_pick else ""
+    html += f'''
         <div class="tweet-metrics">
-            <span class="{metrics_class}">💬 {tweet['replies']} replies</span>
-            <span class="{metrics_class if is_top_pick else ''}">❤️ {tweet['likes']}</span>
-            <span class="{metrics_class if is_top_pick else ''}">🔄 {tweet['retweets']}</span>
+            <span class="{metric_class}">💬 {tweet['replies']} replies</span>
+            <span class="{metric_class if is_top_pick else ""}">❤️ {tweet['likes']}</span>
+            <span class="{metric_class if is_top_pick else ""}">🔄 {tweet['retweets']}</span>
         </div>
         <a href="{tweet_url}" target="_blank" style="color: #1d9bf0; text-decoration: none;">🔗 View on Twitter →</a>
     </div>
-    """, unsafe_allow_html=True)
+    '''
+    
+    st.markdown(html, unsafe_allow_html=True)
 
 def generate_rewrites(original_tweet):
     """Generate all 4 rewrite styles at once"""
@@ -277,19 +284,42 @@ Keep it under 280 characters. Sound like Tyler - insider perspective, conversati
 
 if st.button("🔍 Scan for Viral Broncos & Nuggets Debates", use_container_width=True):
     with st.spinner("Scanning Twitter for controversial Broncos & Nuggets content..."):
+        # FINAL 25 BRONCOS KEYWORDS
         broncos_keywords = [
             "Denver Broncos",
-            "Sean Payton", 
             "Bo Nix",
-            "Patrick Surtain",
+            "Surtain",
             "Courtland Sutton",
-            "Javonte Williams",
-            "Empower Field",
-            "Mile High"
+            "Meinerz",
+            "Bolles",
+            "Zach Allen",
+            "Nik Bonitto",
+            "Evan Engram",
+            "McGlinchey",
+            "Marvin Mims",
+            "Hufanga",
+            "Dre Greenlaw",
+            "Franklin",
+            "Dobbins",
+            "RJ Harvey",
+            "Singleton",
+            "McLaughlin",
+            "Sean Payton",
+            "Vance Joseph",
+            "Davis Webb",
+            "Broncos free agency",
+            "Broncos draft",
+            "Broncos mock draft",
+            "Broncos trade"
         ]
         broncos_tweets = search_viral_tweets(broncos_keywords)
         
-        nuggets_keywords = ["Denver Nuggets", "Nikola Jokic", "Jokic", "Jamal Murray", "Ball Arena"]
+        # FINAL 3 NUGGETS KEYWORDS
+        nuggets_keywords = [
+            "Denver Nuggets",
+            "Nikola Jokic",
+            "Jamal Murray"
+        ]
         nuggets_tweets = search_viral_tweets(nuggets_keywords)
         
         top_broncos = broncos_tweets[:10]
@@ -302,7 +332,7 @@ if st.button("🔍 Scan for Viral Broncos & Nuggets Debates", use_container_widt
             if len(top_broncos) >= 3:
                 st.markdown("### ⭐ TOP 3 BRONCOS PICKS")
                 for i, tweet in enumerate(top_broncos[:3]):
-                    display_tweet_card(tweet, is_top_pick=True, pick_number=i+1)
+                    render_tweet_card(tweet, is_top_pick=True, pick_number=i+1)
                     
                     with st.spinner("Generating rewrites in your voice..."):
                         rewrites = generate_rewrites(tweet['text'])
@@ -335,7 +365,7 @@ if st.button("🔍 Scan for Viral Broncos & Nuggets Debates", use_container_widt
             if len(top_broncos) > 3:
                 st.markdown("### 🏈 OTHER BRONCOS TWEETS")
                 for idx, tweet in enumerate(top_broncos[3:], start=3):
-                    display_tweet_card(tweet, is_top_pick=False)
+                    render_tweet_card(tweet, is_top_pick=False)
                     
                     with st.spinner("Generating rewrites in your voice..."):
                         rewrites = generate_rewrites(tweet['text'])
@@ -368,38 +398,7 @@ if st.button("🔍 Scan for Viral Broncos & Nuggets Debates", use_container_widt
             if top_nuggets:
                 st.markdown("### 🏀 NUGGETS TWEETS")
                 for idx, tweet in enumerate(top_nuggets):
-                    # Special styling for Nuggets badge
-                    tweet_url = f"https://twitter.com/{tweet['author']}/status/{tweet['id']}"
-                    
-                    st.markdown(f"""
-                    <div class="tweet-card">
-                        <div class="tweet-header">
-                            <span class="priority-badge" style="background-color: #fdb927; color: #00285e;">🏀 NUGGETS</span>
-                            <strong>{tweet['author_name']}</strong> @{tweet['author']}
-                        </div>
-                        <div class="tweet-text">{tweet['text']}</div>
-                    """, unsafe_allow_html=True)
-                    
-                    media = fetch_tweet_media(tweet['id'])
-                    if media:
-                        for m in media:
-                            try:
-                                if m.type == 'photo' and hasattr(m, 'url') and m.url:
-                                    st.image(m.url, width=400)
-                                elif m.type in ['video', 'animated_gif'] and hasattr(m, 'preview_image_url') and m.preview_image_url:
-                                    st.image(m.preview_image_url, caption="▶️ Video", width=400)
-                            except:
-                                pass
-                    
-                    st.markdown(f"""
-                        <div class="tweet-metrics">
-                            <span class="metric-high">💬 {tweet['replies']} replies</span>
-                            <span>❤️ {tweet['likes']}</span>
-                            <span>🔄 {tweet['retweets']}</span>
-                        </div>
-                        <a href="{tweet_url}" target="_blank" style="color: #1d9bf0; text-decoration: none;">🔗 View on Twitter →</a>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    render_tweet_card(tweet, is_top_pick=False)
                     
                     with st.spinner("Generating rewrites in your voice..."):
                         rewrites = generate_rewrites(tweet['text'])
