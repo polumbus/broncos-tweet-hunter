@@ -266,7 +266,7 @@ Keep it under 280 characters. Sound like Tyler - insider perspective, conversati
 
 if st.button("🔍 Scan for Viral Broncos & Nuggets Debates", use_container_width=True):
     with st.spinner("Scanning Twitter for controversial Broncos & Nuggets content..."):
-        # FINAL 25 BRONCOS KEYWORDS
+        # FINAL 25 BRONCOS KEYWORDS - "Troy Franklin" not "Franklin"
         broncos_keywords = [
             "Denver Broncos",
             "Bo Nix",
@@ -281,7 +281,7 @@ if st.button("🔍 Scan for Viral Broncos & Nuggets Debates", use_container_widt
             "Marvin Mims",
             "Hufanga",
             "Dre Greenlaw",
-            "Troy Franklin",
+            "Troy Franklin",  # SPECIFIC - not just "Franklin"
             "Dobbins",
             "RJ Harvey",
             "Singleton",
