@@ -5,11 +5,11 @@ from datetime import datetime, timedelta
 import os
 
 # ========================================
-# TESTING MODE - CHANGE THIS
+# PRODUCTION MODE
 # ========================================
-TESTING_MODE = True  # Set to False when ready for full scanning
-MAX_TWEETS = 20  # Always 20 tweets to save Twitter API credits
-HOURS_BACK = 720 if TESTING_MODE else 36  # 30 days for testing, 36 hours for production
+TESTING_MODE = False  # PRODUCTION MODE
+MAX_TWEETS = 100  # Full scan - 100 tweets
+HOURS_BACK = 36  # Last 36 hours
 # ========================================
 
 st.set_page_config(page_title="Broncos Tweet Hunter", layout="wide", initial_sidebar_state="collapsed")
@@ -71,16 +71,6 @@ st.markdown("""
     .bo-nix { background-color: #ff4500; color: white; }
     .sean-payton { background-color: #ff8c00; color: white; }
     .broncos { background-color: #fb4f14; color: white; }
-    .debug-box {
-        background-color: #2d2d2d;
-        border: 1px solid #444;
-        border-radius: 8px;
-        padding: 12px;
-        margin: 12px 0;
-        font-family: monospace;
-        font-size: 12px;
-        color: #00ff00;
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -91,10 +81,7 @@ client = Anthropic()
 client_twitter = tweepy.Client(bearer_token=os.environ["TWITTER_BEARER_TOKEN"], wait_on_rate_limit=True)
 
 st.title("🏈 Broncos Tweet Hunter")
-if TESTING_MODE:
-    st.caption(f"⚠️ TESTING MODE: Fetching {MAX_TWEETS} tweets from last {HOURS_BACK//24} days")
-else:
-    st.caption(f"Find the most controversial Denver Broncos debates from the last {HOURS_BACK} hours")
+st.caption(f"Find the most controversial Denver Broncos & Nuggets debates from the last {HOURS_BACK} hours")
 
 def determine_priority(tweet_text):
     """Determine ranking priority based on content - SMALL tiebreaker only"""
@@ -119,7 +106,7 @@ def is_original_tweet(tweet):
     return True
 
 def search_viral_tweets(keywords, hours=None):
-    """Search for viral tweets with DEBUG LOGGING"""
+    """Search for viral tweets"""
     if hours is None:
         hours = HOURS_BACK
     
@@ -127,14 +114,6 @@ def search_viral_tweets(keywords, hours=None):
     query += " -is:retweet -is:reply lang:en"
     
     start_time = datetime.utcnow() - timedelta(hours=hours)
-    
-    # DEBUG: Show query info
-    debug_info = {
-        'query_length': len(query),
-        'query': query,
-        'start_time': start_time.isoformat(),
-        'max_tweets_requested': MAX_TWEETS
-    }
     
     try:
         tweets = client_twitter.search_recent_tweets(
@@ -146,19 +125,14 @@ def search_viral_tweets(keywords, hours=None):
             user_fields=['username', 'name']
         )
         
-        # DEBUG: Count tweets at each stage
-        debug_info['tweets_returned_by_twitter'] = len(tweets.data) if tweets.data else 0
-        
         if not tweets.data:
-            return [], debug_info
+            return []
         
         users = {user.id: user for user in tweets.includes['users']}
         scored_tweets = []
-        filtered_count = 0
         
         for tweet in tweets.data:
             if not is_original_tweet(tweet):
-                filtered_count += 1
                 continue
             
             metrics = tweet.public_metrics
@@ -186,16 +160,11 @@ def search_viral_tweets(keywords, hours=None):
                 'priority': priority_info
             })
         
-        # DEBUG: Final counts
-        debug_info['filtered_out_by_is_original'] = filtered_count
-        debug_info['final_tweet_count'] = len(scored_tweets)
-        
         scored_tweets.sort(key=lambda x: x['engagement_score'], reverse=True)
-        return scored_tweets, debug_info
+        return scored_tweets
     except Exception as e:
-        debug_info['error'] = str(e)
         st.error(f"Error: {str(e)}")
-        return [], debug_info
+        return []
 
 def fetch_tweet_media(tweet_id):
     """Fetch media for a specific tweet"""
@@ -314,32 +283,14 @@ if st.button("🔍 Scan for Viral Broncos & Nuggets Debates", use_container_widt
             "Broncos mock draft",
             "Broncos trade"
         ]
-        broncos_tweets, broncos_debug = search_viral_tweets(broncos_keywords)
+        broncos_tweets = search_viral_tweets(broncos_keywords)
         
         nuggets_keywords = [
             "Denver Nuggets",
             "Nikola Jokic",
             "Jamal Murray"
         ]
-        nuggets_tweets, nuggets_debug = search_viral_tweets(nuggets_keywords)
-        
-        # SHOW DEBUG INFO
-        st.markdown("### 🐛 DEBUG INFO")
-        st.markdown(f'''
-        <div class="debug-box">
-        <strong>BRONCOS SEARCH:</strong><br>
-        - Query length: {broncos_debug.get('query_length', 'N/A')} chars<br>
-        - Tweets returned by Twitter: {broncos_debug.get('tweets_returned_by_twitter', 0)}<br>
-        - Filtered out by is_original_tweet(): {broncos_debug.get('filtered_out_by_is_original', 0)}<br>
-        - Final tweet count: {broncos_debug.get('final_tweet_count', 0)}<br>
-        <br>
-        <strong>NUGGETS SEARCH:</strong><br>
-        - Query length: {nuggets_debug.get('query_length', 'N/A')} chars<br>
-        - Tweets returned by Twitter: {nuggets_debug.get('tweets_returned_by_twitter', 0)}<br>
-        - Filtered out by is_original_tweet(): {nuggets_debug.get('filtered_out_by_is_original', 0)}<br>
-        - Final tweet count: {nuggets_debug.get('final_tweet_count', 0)}
-        </div>
-        ''', unsafe_allow_html=True)
+        nuggets_tweets = search_viral_tweets(nuggets_keywords)
         
         top_broncos = broncos_tweets[:10]
         top_nuggets = nuggets_tweets[:5]
@@ -446,4 +397,4 @@ if st.button("🔍 Scan for Viral Broncos & Nuggets Debates", use_container_widt
                     
                     st.markdown("---")
         else:
-            st.warning("No tweets found. Try again in a few moments!")
+            st.warning("No tweets found in the last 36 hours. Try again during the NFL season for more content!")
