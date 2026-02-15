@@ -26,41 +26,19 @@ st.markdown("""
         padding: 12px 24px;
         font-size: 16px;
     }
-    .tweet-card {
+    div[data-testid="stVerticalBlock"] > div.tweet-card {
         background-color: #16181c;
         border: 1px solid #2f3336;
         border-radius: 16px;
         padding: 16px;
         margin: 12px 0;
     }
-    .top-pick {
+    div[data-testid="stVerticalBlock"] > div.top-pick {
         background-color: #1a2332;
         border: 2px solid #1d9bf0;
         box-shadow: 0 0 20px rgba(29, 155, 240, 0.3);
-    }
-    .tweet-header {
-        display: flex;
-        align-items: center;
-        margin-bottom: 12px;
-    }
-    .tweet-text {
-        font-size: 15px;
-        line-height: 20px;
-        color: #e7e9ea;
-        margin-bottom: 12px;
-    }
-    .tweet-media {
-        margin: 12px 0;
-    }
-    .tweet-media img {
-        max-width: 300px;
-        border-radius: 12px;
-    }
-    .tweet-metrics {
-        display: flex;
-        gap: 20px;
-        color: #71767b;
-        font-size: 13px;
+        border-radius: 16px;
+        padding: 16px;
         margin: 12px 0;
     }
     .metric-high { color: #f91880; font-weight: bold; }
@@ -206,48 +184,52 @@ def fetch_tweet_media(tweet_id):
     except:
         return []
 
-def render_tweet_card(tweet, is_top_pick=False, pick_number=None):
-    """Render a complete tweet card with media inside"""
+def display_tweet_card(tweet, is_top_pick=False, pick_number=None):
+    """Display a tweet card using Streamlit container"""
     tweet_url = f"https://twitter.com/{tweet['author']}/status/{tweet['id']}"
     
-    card_class = "tweet-card top-pick" if is_top_pick else "tweet-card"
-    
-    html = f'<div class="{card_class}">'
-    
-    if is_top_pick:
-        html += f'<span class="top-pick-badge">⭐ TOP PICK #{pick_number}</span>'
-    
-    html += f'''
-        <div class="tweet-header">
-            <span class="priority-badge {tweet['priority']['color']}">{tweet['priority']['label']}</span>
-            <strong>{tweet['author_name']}</strong> @{tweet['author']}
-        </div>
-        <div class="tweet-text">{tweet['text']}</div>
-    '''
-    
-    media = fetch_tweet_media(tweet['id'])
-    if media:
-        for m in media:
-            try:
-                if m.type == 'photo' and hasattr(m, 'url') and m.url:
-                    html += f'<div class="tweet-media"><img src="{m.url}" style="max-width: 300px; border-radius: 12px;"></div>'
-                elif m.type in ['video', 'animated_gif'] and hasattr(m, 'preview_image_url') and m.preview_image_url:
-                    html += f'<div class="tweet-media"><img src="{m.preview_image_url}" style="max-width: 300px; border-radius: 12px;"><br><small>▶️ Video</small></div>'
-            except:
-                pass
-    
-    metric_class = "metric-high" if is_top_pick else ""
-    html += f'''
-        <div class="tweet-metrics">
-            <span class="{metric_class}">💬 {tweet['replies']} replies</span>
-            <span class="{metric_class if is_top_pick else ""}">❤️ {tweet['likes']}</span>
-            <span class="{metric_class if is_top_pick else ""}">🔄 {tweet['retweets']}</span>
-        </div>
-        <a href="{tweet_url}" target="_blank" style="color: #1d9bf0; text-decoration: none;">🔗 View on Twitter →</a>
-    </div>
-    '''
-    
-    st.markdown(html, unsafe_allow_html=True)
+    # Create container with custom class
+    with st.container():
+        # Top pick badge
+        if is_top_pick:
+            st.markdown(f'<span class="top-pick-badge">⭐ TOP PICK #{pick_number}</span>', unsafe_allow_html=True)
+        
+        # Priority badge and author
+        st.markdown(f'''
+            <div style="margin-bottom: 12px;">
+                <span class="priority-badge {tweet['priority']['color']}">{tweet['priority']['label']}</span>
+                <strong style="color: #e7e9ea;">{tweet['author_name']}</strong> 
+                <span style="color: #71767b;">@{tweet['author']}</span>
+            </div>
+        ''', unsafe_allow_html=True)
+        
+        # Tweet text
+        st.markdown(f'<div style="font-size: 15px; line-height: 20px; color: #e7e9ea; margin-bottom: 12px;">{tweet["text"]}</div>', unsafe_allow_html=True)
+        
+        # Media
+        media = fetch_tweet_media(tweet['id'])
+        if media:
+            for m in media:
+                try:
+                    if m.type == 'photo' and hasattr(m, 'url') and m.url:
+                        st.image(m.url, width=300)
+                    elif m.type in ['video', 'animated_gif'] and hasattr(m, 'preview_image_url') and m.preview_image_url:
+                        st.image(m.preview_image_url, caption="▶️ Video", width=300)
+                except:
+                    pass
+        
+        # Metrics
+        metric_style = "metric-high" if is_top_pick else ""
+        st.markdown(f'''
+            <div style="display: flex; gap: 20px; color: #71767b; font-size: 13px; margin: 12px 0;">
+                <span class="{metric_style}">💬 {tweet['replies']} replies</span>
+                <span class="{metric_style}">❤️ {tweet['likes']}</span>
+                <span class="{metric_style}">🔄 {tweet['retweets']}</span>
+            </div>
+        ''', unsafe_allow_html=True)
+        
+        # Twitter link
+        st.markdown(f'<a href="{tweet_url}" target="_blank" style="color: #1d9bf0; text-decoration: none;">🔗 View on Twitter →</a>', unsafe_allow_html=True)
 
 def generate_rewrites(original_tweet):
     """Generate all 4 rewrite styles at once"""
@@ -299,7 +281,7 @@ if st.button("🔍 Scan for Viral Broncos & Nuggets Debates", use_container_widt
             "Marvin Mims",
             "Hufanga",
             "Dre Greenlaw",
-            "Franklin",
+            "Troy Franklin",
             "Dobbins",
             "RJ Harvey",
             "Singleton",
@@ -332,7 +314,7 @@ if st.button("🔍 Scan for Viral Broncos & Nuggets Debates", use_container_widt
             if len(top_broncos) >= 3:
                 st.markdown("### ⭐ TOP 3 BRONCOS PICKS")
                 for i, tweet in enumerate(top_broncos[:3]):
-                    render_tweet_card(tweet, is_top_pick=True, pick_number=i+1)
+                    display_tweet_card(tweet, is_top_pick=True, pick_number=i+1)
                     
                     with st.spinner("Generating rewrites in your voice..."):
                         rewrites = generate_rewrites(tweet['text'])
@@ -365,7 +347,7 @@ if st.button("🔍 Scan for Viral Broncos & Nuggets Debates", use_container_widt
             if len(top_broncos) > 3:
                 st.markdown("### 🏈 OTHER BRONCOS TWEETS")
                 for idx, tweet in enumerate(top_broncos[3:], start=3):
-                    render_tweet_card(tweet, is_top_pick=False)
+                    display_tweet_card(tweet, is_top_pick=False)
                     
                     with st.spinner("Generating rewrites in your voice..."):
                         rewrites = generate_rewrites(tweet['text'])
@@ -398,7 +380,7 @@ if st.button("🔍 Scan for Viral Broncos & Nuggets Debates", use_container_widt
             if top_nuggets:
                 st.markdown("### 🏀 NUGGETS TWEETS")
                 for idx, tweet in enumerate(top_nuggets):
-                    render_tweet_card(tweet, is_top_pick=False)
+                    display_tweet_card(tweet, is_top_pick=False)
                     
                     with st.spinner("Generating rewrites in your voice..."):
                         rewrites = generate_rewrites(tweet['text'])
