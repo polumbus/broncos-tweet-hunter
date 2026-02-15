@@ -8,8 +8,8 @@ import os
 # PRODUCTION MODE
 # ========================================
 TESTING_MODE = False
-MAX_TWEETS = 100
-HOURS_BACK = 168  # 7 days
+MAX_TWEETS = 100  # 100 per search × 2 searches = 200 tweets/day
+HOURS_BACK = 36  # Last 36 hours
 # ========================================
 
 st.set_page_config(page_title="Broncos Tweet Hunter", layout="wide", initial_sidebar_state="collapsed")
@@ -81,7 +81,7 @@ client = Anthropic()
 client_twitter = tweepy.Client(bearer_token=os.environ["TWITTER_BEARER_TOKEN"], wait_on_rate_limit=True)
 
 st.title("🏈 Broncos Tweet Hunter")
-st.caption(f"Find the most controversial Denver Broncos & Nuggets debates from the last {HOURS_BACK//24} days")
+st.caption(f"Find the most controversial Denver Broncos & Nuggets debates from the last {HOURS_BACK} hours")
 
 def determine_priority(tweet_text):
     """Determine ranking priority based on content - SMALL tiebreaker only"""
@@ -92,6 +92,24 @@ def determine_priority(tweet_text):
         return {"rank": 2, "label": "⚡ SEAN PAYTON", "color": "sean-payton", "priority": 50}
     else:
         return {"rank": 3, "label": "🏈 BRONCOS", "color": "broncos", "priority": 10}
+
+def is_spam_tweet(tweet, metrics):
+    """Filter out spam tweets"""
+    # Block tweets starting with @ (replies/mass tags)
+    if tweet.text.startswith('@'):
+        return True
+    
+    # Block tweets with excessive @ mentions (spam)
+    at_mention_count = tweet.text.count('@')
+    if at_mention_count >= 10:
+        return True
+    
+    # Block tweets with very low total engagement
+    total_engagement = metrics['reply_count'] + metrics['like_count'] + metrics['retweet_count']
+    if total_engagement < 5:
+        return True
+    
+    return False
 
 def is_original_tweet(tweet):
     """Check if tweet is original - ONLY block actual retweets"""
@@ -112,7 +130,7 @@ def search_viral_tweets(keywords, hours=None):
     
     # Mix of hashtags and keywords - NO QUOTES for broader matching
     query = " OR ".join(keywords)
-    query += " -is:retweet lang:en"  # REMOVED -is:reply to catch more
+    query += " -is:retweet lang:en"
     
     start_time = datetime.utcnow() - timedelta(hours=hours)
     
@@ -133,10 +151,16 @@ def search_viral_tweets(keywords, hours=None):
         scored_tweets = []
         
         for tweet in tweets.data:
+            metrics = tweet.public_metrics
+            
+            # SPAM FILTER
+            if is_spam_tweet(tweet, metrics):
+                continue
+            
+            # RETWEET FILTER
             if not is_original_tweet(tweet):
                 continue
             
-            metrics = tweet.public_metrics
             priority_info = determine_priority(tweet.text)
             
             engagement_score = (
@@ -380,4 +404,4 @@ if st.button("🔍 Scan for Viral Broncos & Nuggets Debates", use_container_widt
                     
                     st.markdown("---")
         else:
-            st.warning("No tweets found.")
+            st.warning("No tweets found in the last 36 hours.")
