@@ -106,13 +106,13 @@ def is_original_tweet(tweet):
     return True
 
 def search_viral_tweets(keywords, hours=None):
-    """Search for viral tweets - SIMPLE, NO ENGAGEMENT FILTER"""
+    """Search for viral tweets - HASHTAGS + KEYWORDS"""
     if hours is None:
         hours = HOURS_BACK
     
-    # Use unquoted keywords for broader matching
-    query = " OR ".join(keywords)  # NO QUOTES - more flexible
-    query += " -is:retweet -is:reply lang:en"
+    # Mix of hashtags and keywords - NO QUOTES for broader matching
+    query = " OR ".join(keywords)
+    query += " -is:retweet lang:en"  # REMOVED -is:reply to catch more
     
     start_time = datetime.utcnow() - timedelta(hours=hours)
     
@@ -257,19 +257,21 @@ Keep it under 280 characters. Sound like Tyler - insider perspective, conversati
 
 if st.button("🔍 Scan for Viral Broncos & Nuggets Debates", use_container_width=True):
     with st.spinner("Scanning Twitter for controversial Broncos & Nuggets content..."):
+        # HASHTAGS + KEYWORDS - matches your examples
         broncos_keywords = [
+            "#Broncos",
+            "#BroncosCountry",
             "Broncos",
             "Bo Nix",
             "Surtain",
-            "Sutton",
             "Sean Payton"
         ]
         broncos_tweets = search_viral_tweets(broncos_keywords)
         
         nuggets_keywords = [
+            "#Nuggets",
             "Nuggets",
-            "Jokic",
-            "Jamal Murray"
+            "Jokic"
         ]
         nuggets_tweets = search_viral_tweets(nuggets_keywords)
         
