@@ -7,10 +7,9 @@ import os
 # ========================================
 # PRODUCTION MODE
 # ========================================
-TESTING_MODE = False  # PRODUCTION MODE
-MAX_TWEETS = 100  # Twitter's max per request
-HOURS_BACK = 168  # 7 days (Twitter's max for free tier)
-MIN_RETWEETS = 5  # Only show tweets with at least 5 retweets (proven viral)
+TESTING_MODE = False
+MAX_TWEETS = 100
+HOURS_BACK = 168  # 7 days
 # ========================================
 
 st.set_page_config(page_title="Broncos Tweet Hunter", layout="wide", initial_sidebar_state="collapsed")
@@ -106,14 +105,22 @@ def is_original_tweet(tweet):
     
     return True
 
-def search_viral_tweets(keywords, hours=None, min_retweets=MIN_RETWEETS):
-    """Search for viral tweets with min_retweets filter"""
+def has_minimum_engagement(metrics):
+    """Check if tweet has enough engagement to be worth showing"""
+    return (
+        metrics['reply_count'] >= 5 or
+        metrics['like_count'] >= 20 or
+        metrics['retweet_count'] >= 5
+    )
+
+def search_viral_tweets(keywords, hours=None):
+    """Search for viral tweets - EXPANDED SEARCH"""
     if hours is None:
         hours = HOURS_BACK
     
-    query = " OR ".join([f'"{k}"' for k in keywords])
-    # ADD MIN_RETWEETS FILTER - only viral tweets!
-    query += f" min_retweets:{min_retweets} -is:retweet -is:reply lang:en"
+    # Build query with BOTH quoted exact matches AND unquoted broad matches
+    quoted = " OR ".join([f'"{k}"' for k in keywords])
+    query = quoted + " -is:retweet -is:reply lang:en"
     
     start_time = datetime.utcnow() - timedelta(hours=hours)
     
@@ -134,10 +141,16 @@ def search_viral_tweets(keywords, hours=None, min_retweets=MIN_RETWEETS):
         scored_tweets = []
         
         for tweet in tweets.data:
+            # Filter out retweets and replies
             if not is_original_tweet(tweet):
                 continue
             
             metrics = tweet.public_metrics
+            
+            # Filter out low engagement tweets
+            if not has_minimum_engagement(metrics):
+                continue
+            
             priority_info = determine_priority(tweet.text)
             
             engagement_score = (
@@ -258,7 +271,7 @@ Keep it under 280 characters. Sound like Tyler - insider perspective, conversati
 
 if st.button("🔍 Scan for Viral Broncos & Nuggets Debates", use_container_width=True):
     with st.spinner("Scanning Twitter for controversial Broncos & Nuggets content..."):
-        # EXPANDED KEYWORDS - More variations and hashtags
+        # EXPANDED KEYWORDS - include variations
         broncos_keywords = [
             "Denver Broncos",
             "Broncos",
@@ -273,12 +286,10 @@ if st.button("🔍 Scan for Viral Broncos & Nuggets Debates", use_container_widt
             "Payton",
             "Vance Joseph",
             "#Broncos",
-            "#BroncosCountry",
-            "#BroncoNation"
+            "#BroncosCountry"
         ]
         broncos_tweets = search_viral_tweets(broncos_keywords)
         
-        # EXPANDED NUGGETS KEYWORDS
         nuggets_keywords = [
             "Denver Nuggets",
             "Nuggets",
@@ -287,14 +298,14 @@ if st.button("🔍 Scan for Viral Broncos & Nuggets Debates", use_container_widt
             "Jamal Murray",
             "#MileHighBasketball"
         ]
-        nuggets_tweets = search_viral_tweets(nuggets_keywords, min_retweets=10)  # Higher bar for Nuggets
+        nuggets_tweets = search_viral_tweets(nuggets_keywords)
         
         top_broncos = broncos_tweets[:10]
         top_nuggets = nuggets_tweets[:5]
         
         if top_broncos or top_nuggets:
             st.success(f"✅ Found {len(top_broncos)} Broncos + {len(top_nuggets)} Nuggets debates!")
-            st.info(f"🔥 Showing only tweets with {MIN_RETWEETS}+ retweets (proven viral content)")
+            st.info("🔥 Showing tweets with 5+ replies OR 20+ likes OR 5+ retweets")
             
             if top_broncos:
                 top_3_count = min(3, len(top_broncos))
@@ -395,5 +406,5 @@ if st.button("🔍 Scan for Viral Broncos & Nuggets Debates", use_container_widt
                     
                     st.markdown("---")
         else:
-            st.warning(f"⚠️ No viral tweets found in the last {HOURS_BACK//24} days with {MIN_RETWEETS}+ retweets.")
-            st.info("💡 Try again later! Viral content happens during games, draft, free agency, etc.")
+            st.warning("⚠️ No viral tweets found in the last 7 days.")
+            st.info("💡 Looking for tweets with 5+ replies OR 20+ likes OR 5+ retweets")
