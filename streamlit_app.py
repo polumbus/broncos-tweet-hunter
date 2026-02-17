@@ -585,35 +585,28 @@ def display_tweet_card(tweet, is_top_pick=False, pick_number=None):
         st.markdown(f'<a href="{tweet_url}" target="_blank" style="color: #1d9bf0; text-decoration: none;">🔗 View on Twitter →</a>', unsafe_allow_html=True)
 
 def generate_rewrites(original_tweet):
-    """Generate all 4 rewrite styles at once using Haiku with prompt caching"""
+    """Generate all 4 rewrite styles at once"""
     
-    # FIXED SYSTEM PROMPT (cached across calls - THE SPEED MAGIC!)
-    system_prompt = [
-        {
-            "type": "text",
-            "text": "You are Tyler Polumbus, former Denver Broncos player and current radio/podcast host. Rewrite viral tweets in your authentic voice."
-        },
-        {
-            "type": "text",
-            "text": """Generate 4 versions for every tweet:
-1. DEFAULT: Clean sports-radio voice
-2. ANALYTICAL: Film/Stats breakdown
-3. CONTROVERSIAL: Spicy hot take
-4. PERSONAL: First-person NFL experience
+    # Use the working Sonnet model for now
+    prompt = f'''Rewrite this viral Broncos tweet in 4 different styles for Tyler Polumbus (former Broncos player, radio host):
 
-Return ONLY valid JSON: {"Default": "...", "Analytical": "...", "Controversial": "...", "Personal": "..."}""",
-            "cache_control": {"type": "ephemeral"}   # Cache this instruction block!
-        }
-    ]
-    
-    user_prompt = f"Original tweet:\n{original_tweet}"
+Original tweet:
+{original_tweet}
+
+Generate 4 versions:
+1. DEFAULT: Clean, informative, sports radio voice
+2. ANALYTICAL: Stats-focused, film breakdown style
+3. CONTROVERSIAL: Spicy hot take that drives engagement
+4. PERSONAL: First-person from Tyler's NFL experience
+
+Return ONLY valid JSON:
+{{"Default": "...", "Analytical": "...", "Controversial": "...", "Personal": "..."}}'''
     
     try:
         message = client.messages.create(
-            model="claude-haiku-4-20250514",   # Haiku is 3-5x faster than Sonnet!
-            max_tokens=800,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_prompt}]
+            model="claude-sonnet-4-5-20250929",  # Back to working Sonnet
+            max_tokens=1000,
+            messages=[{"role": "user", "content": prompt}]
         )
         
         response_text = message.content[0].text
@@ -687,7 +680,7 @@ if st.session_state.current_broncos_tweets or st.session_state.current_nuggets_t
             top_3_tweets = top_broncos[:top_3_count]
             
             # Check if we need to generate rewrites
-            need_generation = any(f"rewrites_top{i}" not in st.session_state for i in range(top_3_count))
+            need_generation = any(f"rewrites_b{i}" not in st.session_state for i in range(top_3_count))
             
             if need_generation:
                 with st.spinner(f"🚀 Generating rewrites for TOP 3 in parallel..."):
@@ -699,7 +692,7 @@ if st.session_state.current_broncos_tweets or st.session_state.current_nuggets_t
                         futures = [executor.submit(generate_for_index, i) for i in range(top_3_count)]
                         for future in futures:
                             idx, rewrites = future.result()
-                            st.session_state[f"rewrites_top{idx}"] = rewrites
+                            st.session_state[f"rewrites_b{idx}"] = rewrites
             
             # Display all TOP 3 with their rewrites
             for i in range(top_3_count):
@@ -707,7 +700,7 @@ if st.session_state.current_broncos_tweets or st.session_state.current_nuggets_t
                 display_tweet_card(tweet, is_top_pick=True, pick_number=i+1)
                 
                 # Show rewrites (already generated)
-                rewrite_key = f"rewrites_top{i}"
+                rewrite_key = f"rewrites_b{i}"
                 if rewrite_key in st.session_state:
                     rewrites = st.session_state[rewrite_key]
                     st.markdown("**✍️ Your Rewrites (edit before copying):**")
@@ -770,16 +763,11 @@ if st.session_state.current_broncos_tweets or st.session_state.current_nuggets_t
                 # Button to generate rewrites on demand
                 rewrite_key = f"rewrites_b{idx}"
                 
-                # Always show button (changes text if already generated)
-                if rewrite_key in st.session_state:
-                    button_text = "🔄 Regenerate Rewrites"
-                else:
-                    button_text = "✨ Generate Rewrites"
-                
-                if st.button(button_text, key=f"gen_b{idx}", use_container_width=True):
-                    with st.spinner("Generating rewrites..."):
-                        st.session_state[rewrite_key] = generate_rewrites(tweet['text'])
-                        st.rerun()
+                if rewrite_key not in st.session_state:
+                    if st.button(f"✨ Generate Rewrites", key=f"gen_b{idx}", use_container_width=True):
+                        with st.spinner("Generating rewrites..."):
+                            st.session_state[rewrite_key] = generate_rewrites(tweet['text'])
+                            st.rerun()
                 
                 # Show rewrites if generated
                 if rewrite_key in st.session_state:
@@ -844,16 +832,11 @@ if st.session_state.current_broncos_tweets or st.session_state.current_nuggets_t
             # Button to generate rewrites on demand
             rewrite_key = f"rewrites_n{idx}"
             
-            # Always show button (changes text if already generated)
-            if rewrite_key in st.session_state:
-                button_text = "🔄 Regenerate Rewrites"
-            else:
-                button_text = "✨ Generate Rewrites"
-            
-            if st.button(button_text, key=f"gen_n{idx}", use_container_width=True):
-                with st.spinner("Generating rewrites..."):
-                    st.session_state[rewrite_key] = generate_rewrites(tweet['text'])
-                    st.rerun()
+            if rewrite_key not in st.session_state:
+                if st.button(f"✨ Generate Rewrites", key=f"gen_n{idx}", use_container_width=True):
+                    with st.spinner("Generating rewrites..."):
+                        st.session_state[rewrite_key] = generate_rewrites(tweet['text'])
+                        st.rerun()
             
             # Show rewrites if generated
             if rewrite_key in st.session_state:
