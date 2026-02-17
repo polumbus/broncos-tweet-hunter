@@ -8,8 +8,8 @@ import os
 # PRODUCTION MODE
 # ========================================
 TESTING_MODE = False
-MAX_TWEETS = 100  # 100 per search × 2 searches = 200 tweets/day
-HOURS_BACK = 36  # Last 36 hours
+MAX_TWEETS = 100
+HOURS_BACK = 36
 # ========================================
 
 st.set_page_config(page_title="Broncos Tweet Hunter", layout="wide", initial_sidebar_state="collapsed")
@@ -94,19 +94,23 @@ def determine_priority(tweet_text):
         return {"rank": 3, "label": "🏈 BRONCOS", "color": "broncos", "priority": 10}
 
 def is_spam_tweet(tweet, metrics):
-    """Filter out spam tweets"""
-    # Block tweets starting with @ (replies/mass tags)
-    if tweet.text.startswith('@'):
+    """Filter out spam tweets - RELAXED per Grok's recommendation"""
+    total_engagement = (
+        metrics['reply_count'] + 
+        metrics['like_count'] + 
+        metrics['retweet_count']
+    )
+    
+    # Only block low-engagement @-replies (not all @-starts)
+    if tweet.text.startswith('@') and total_engagement < 20:
         return True
     
-    # Block tweets with excessive @ mentions (spam)
-    at_mention_count = tweet.text.count('@')
-    if at_mention_count >= 10:
+    # Block excessive mass mentions
+    if tweet.text.count('@') >= 10:
         return True
     
-    # Block tweets with very low total engagement
-    total_engagement = metrics['reply_count'] + metrics['like_count'] + metrics['retweet_count']
-    if total_engagement < 5:
+    # Raise minimum threshold (was 5, now 10)
+    if total_engagement < 10:
         return True
     
     return False
@@ -124,21 +128,22 @@ def is_original_tweet(tweet):
     return True
 
 def search_viral_tweets(keywords, hours=None):
-    """Search for viral tweets - HASHTAGS + KEYWORDS"""
+    """Search for viral tweets - WITH RELEVANCY SORTING!"""
     if hours is None:
         hours = HOURS_BACK
     
-    # Mix of hashtags and keywords - NO QUOTES for broader matching
     query = " OR ".join(keywords)
     query += " -is:retweet lang:en"
     
     start_time = datetime.utcnow() - timedelta(hours=hours)
     
     try:
+        # PRIMARY FIX: Add sort_order='relevancy'
         tweets = client_twitter.search_recent_tweets(
             query=query,
             max_results=MAX_TWEETS,
             start_time=start_time,
+            sort_order='relevancy',  # ← CRITICAL FIX!
             tweet_fields=['public_metrics', 'created_at', 'referenced_tweets'],
             expansions=['author_id'],
             user_fields=['username', 'name']
@@ -152,6 +157,12 @@ def search_viral_tweets(keywords, hours=None):
         
         for tweet in tweets.data:
             metrics = tweet.public_metrics
+            user = users.get(tweet.author_id)
+            
+            # DEBUG LOGGING (optional - can remove in production)
+            print(f"@{user.username if user else 'Unknown'} | {tweet.created_at} | "
+                  f"Replies:{metrics['reply_count']} RTs:{metrics['retweet_count']} "
+                  f"Likes:{metrics['like_count']} | {tweet.text[:80]}...")
             
             # SPAM FILTER
             if is_spam_tweet(tweet, metrics):
@@ -170,8 +181,6 @@ def search_viral_tweets(keywords, hours=None):
                 priority_info['priority']
             )
             
-            user = users.get(tweet.author_id)
-            
             scored_tweets.append({
                 'id': tweet.id,
                 'text': tweet.text,
@@ -186,6 +195,63 @@ def search_viral_tweets(keywords, hours=None):
             })
         
         scored_tweets.sort(key=lambda x: x['engagement_score'], reverse=True)
+        
+        # SMART FALLBACK: If too few results, add recency search
+        if len(scored_tweets) < 8:
+            print("⚠️ Relevancy returned few results, adding recency fallback...")
+            try:
+                tweets_recency = client_twitter.search_recent_tweets(
+                    query=query,
+                    max_results=100,
+                    start_time=start_time,
+                    # No sort_order = recency
+                    tweet_fields=['public_metrics', 'created_at', 'referenced_tweets'],
+                    expansions=['author_id'],
+                    user_fields=['username', 'name']
+                )
+                
+                if tweets_recency.data:
+                    users_recency = {user.id: user for user in tweets_recency.includes['users']}
+                    
+                    for tweet in tweets_recency.data:
+                        # Skip if already in results
+                        if any(t['id'] == tweet.id for t in scored_tweets):
+                            continue
+                        
+                        metrics = tweet.public_metrics
+                        
+                        if is_spam_tweet(tweet, metrics):
+                            continue
+                        
+                        if not is_original_tweet(tweet):
+                            continue
+                        
+                        priority_info = determine_priority(tweet.text)
+                        engagement_score = (
+                            (metrics['reply_count'] * 100000) + 
+                            (metrics['retweet_count'] * 100) + 
+                            metrics['like_count'] + 
+                            priority_info['priority']
+                        )
+                        
+                        user = users_recency.get(tweet.author_id)
+                        scored_tweets.append({
+                            'id': tweet.id,
+                            'text': tweet.text,
+                            'author': user.username if user else 'Unknown',
+                            'author_name': user.name if user else 'Unknown',
+                            'created_at': tweet.created_at,
+                            'likes': metrics['like_count'],
+                            'retweets': metrics['retweet_count'],
+                            'replies': metrics['reply_count'],
+                            'engagement_score': engagement_score,
+                            'priority': priority_info
+                        })
+                    
+                    scored_tweets.sort(key=lambda x: x['engagement_score'], reverse=True)
+            except Exception as e:
+                print(f"Fallback search error: {e}")
+        
         return scored_tweets
     except Exception as e:
         st.error(f"Error: {str(e)}")
@@ -281,11 +347,12 @@ Keep it under 280 characters. Sound like Tyler - insider perspective, conversati
 
 if st.button("🔍 Scan for Viral Broncos & Nuggets Debates", use_container_width=True):
     with st.spinner("Scanning Twitter for controversial Broncos & Nuggets content..."):
-        # HASHTAGS + KEYWORDS - matches your examples
+        # ENHANCED KEYWORDS per Grok's recommendations
         broncos_keywords = [
             "#Broncos",
             "#BroncosCountry",
             "Broncos",
+            "Denver Broncos",  # Phrase matching
             "Bo Nix",
             "Surtain",
             "Sean Payton"
@@ -295,6 +362,7 @@ if st.button("🔍 Scan for Viral Broncos & Nuggets Debates", use_container_widt
         nuggets_keywords = [
             "#Nuggets",
             "Nuggets",
+            "Denver Nuggets",  # Phrase matching
             "Jokic"
         ]
         nuggets_tweets = search_viral_tweets(nuggets_keywords)
