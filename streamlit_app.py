@@ -859,3 +859,4 @@ if scan_button or scan_new_button:
                 st.warning(f"⚠️ No NEW viral debates found (already showed {len(exclude_ids)} tweets). Try regular scan or clear history!")
             else:
                 st.warning("⚠️ No viral debates found in the last 36 hours. Try again later!")
+
