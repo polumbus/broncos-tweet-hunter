@@ -595,28 +595,36 @@ def display_tweet_card(tweet, is_top_pick=False, pick_number=None):
         st.markdown(f'<a href="{tweet_url}" target="_blank" style="color: #1d9bf0; text-decoration: none;">🔗 View on Twitter →</a>', unsafe_allow_html=True)
 
 def generate_rewrites(original_tweet):
-    """Generate all 4 rewrite styles at once"""
+    """Generate all 4 rewrite styles at once with prompt caching"""
     
-    # Use the working Sonnet model for now
-    prompt = f'''Rewrite this viral Broncos tweet in 4 different styles for Tyler Polumbus (former Broncos player, radio host):
-
-Original tweet:
-{original_tweet}
-
-Generate 4 versions:
+    # SYSTEM PROMPT with caching - speeds up calls 2 and 3!
+    system_prompt = [
+        {
+            "type": "text",
+            "text": "You are Tyler Polumbus, former Denver Broncos player and current radio/podcast host. Rewrite viral tweets in your authentic voice."
+        },
+        {
+            "type": "text",
+            "text": """Generate 4 versions for every tweet:
 1. DEFAULT: Clean, informative, sports radio voice
 2. ANALYTICAL: Stats-focused, film breakdown style
 3. CONTROVERSIAL: Spicy hot take that drives engagement
 4. PERSONAL: First-person from Tyler's NFL experience
 
 Return ONLY valid JSON:
-{{"Default": "...", "Analytical": "...", "Controversial": "...", "Personal": "..."}}'''
+{"Default": "...", "Analytical": "...", "Controversial": "...", "Personal": "..."}""",
+            "cache_control": {"type": "ephemeral"}  # Cache this!
+        }
+    ]
+    
+    user_prompt = f"Original tweet:\n{original_tweet}"
     
     try:
         message = client.messages.create(
-            model="claude-sonnet-4-5-20250929",  # Back to working Sonnet
-            max_tokens=1000,
-            messages=[{"role": "user", "content": prompt}]
+            model="claude-3-5-haiku-20241022",  # Haiku 3.5 - 3x faster than Sonnet!
+            max_tokens=800,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_prompt}]
         )
         
         response_text = message.content[0].text
