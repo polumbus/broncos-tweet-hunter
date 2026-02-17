@@ -93,6 +93,16 @@ client_twitter = tweepy.Client(bearer_token=os.environ["TWITTER_BEARER_TOKEN"], 
 st.title("🏈 Broncos Tweet Hunter")
 st.caption(f"Find the most controversial Denver Broncos & Nuggets debates from the last {HOURS_BACK} hours")
 
+# Keywords
+BRONCOS_KEYWORDS = [
+    "#Broncos", "#BroncosCountry", "Broncos", "Denver Broncos",
+    "Bo Nix", "Surtain", "Sean Payton"
+]
+
+NUGGETS_KEYWORDS = [
+    "#Nuggets", "Nuggets", "Denver Nuggets", "Jokic"
+]
+
 def determine_priority(tweet_text):
     """Determine ranking priority based on content"""
     text_lower = tweet_text.lower()
@@ -110,41 +120,40 @@ def calculate_debate_score(metrics, tweet_text):
     
     # Base score — replies dominate
     score = (
-        metrics['reply_count'] * 75000 +      # Massive weight on replies (debate)
-        metrics['retweet_count'] * 1200 +     # Strong weight on retweets (spread)
-        metrics['like_count'] * 8 +           # Likes almost ignored
+        metrics['reply_count'] * 75000 +      # Debate king
+        metrics['retweet_count'] * 1200 +     # Viral spread
+        metrics['like_count'] * 8 +           # Minor factor
         determine_priority(tweet_text)['priority']
     )
     
-    # Bonus for controversial language (extra push for debate tweets)
+    # Bonus for controversial language
     controversy_keywords = [
-        "fire", "trade", "overrated", "bust", "sucks", "trash", "worst", 
-        "choke", "flop", "out", "hot take", "debate", "controversial", 
-        "payton out", "nix sucks", "jokic flop", "no fly zone"
+        "fire", "trade", "overrated", "bust", "sucks", "trash", "worst",
+        "choke", "flop", "out", "hot take", "debate", "controversial",
+        "payton out", "nix sucks", "jokic flop", "worst trade", "mistake",
+        "regret", "washed", "benched", "russ cooked", "payton system",
+        "draft mistake", "playoff miss", "murray inconsistent", "title window",
+        "mpj contract", "no fly zone"
     ]
     if any(kw in text_lower for kw in controversy_keywords):
-        score += 250000  # Huge boost — puts it near top
+        score += 250000  # Huge boost
     
     return score
 
 def is_spam_tweet(tweet, metrics):
     """Filter out spam tweets - RELAXED for debate tweets"""
-    total_engagement = (
-        metrics['reply_count'] + 
-        metrics['like_count'] + 
-        metrics['retweet_count']
-    )
+    total = metrics['reply_count'] + metrics['like_count'] + metrics['retweet_count']
     
-    # Allow high-reply @-replies (debate threads)
-    if tweet.text.startswith('@') and total_engagement < 15:
+    # Allow high-engagement @-replies (debate threads)
+    if tweet.text.startswith('@') and total < 15:
         return True
     
-    # Block excessive mass mentions (raise threshold)
+    # Block excessive mass mentions
     if tweet.text.count('@') >= 15:
         return True
     
-    # Raise minimum threshold
-    if total_engagement < 8:
+    # Minimum engagement threshold
+    if total < 8:
         return True
     
     return False
@@ -161,22 +170,21 @@ def is_original_tweet(tweet):
     
     return True
 
-def search_viral_tweets(keywords, hours=None, debate_mode=False):
+def search_viral_tweets(keywords, hours=36, debate_mode=False):
     """Search for viral tweets - WITH RELEVANCY SORTING + OPTIONAL DEBATE MODE"""
-    if hours is None:
-        hours = HOURS_BACK
+    base_query = " OR ".join(keywords)
+    query = f"({base_query}) -is:retweet lang:en"
     
-    base_keywords = " OR ".join(keywords)
-    query = base_keywords + " -is:retweet lang:en"
-    
-    # DEBATE MODE: Add controversial terms to query
     if debate_mode:
-        debate_terms = [
-            "fire Payton", "Payton out", "Bo Nix bust", "Bo Nix overrated", 
-            "Surtain overrated", "trade", "worst", "sucks", "trash", "debate", 
-            "hot take", "no fly zone sucks"
+        # Controversy terms - tweets must match keywords AND have controversy
+        controversy = [
+            "fire", "trade", "overrated", "bust", "sucks", "trash", "worst",
+            "choke", "flop", "out", "hot take", "debate", "controversial",
+            "payton out", "nix sucks", "jokic flop", "worst trade", "mistake",
+            "regret", "washed", "benched", "russ cooked"
         ]
-        query = f"({query}) OR ({' OR '.join(debate_terms)})"
+        debate_part = " OR ".join(controversy)
+        query = f"({query}) ({debate_part})"  # AND-like via parentheses
     
     start_time = datetime.utcnow() - timedelta(hours=hours)
     
@@ -185,36 +193,61 @@ def search_viral_tweets(keywords, hours=None, debate_mode=False):
             query=query,
             max_results=MAX_TWEETS,
             start_time=start_time,
-            sort_order='relevancy',  # CRITICAL: Get best tweets from Twitter
+            sort_order='relevancy',  # CRITICAL: Get best tweets
             tweet_fields=['public_metrics', 'created_at', 'referenced_tweets'],
             expansions=['author_id'],
             user_fields=['username', 'name']
         )
+        return tweets
+    except Exception as e:
+        st.error(f"Search error: {str(e)}")
+        return None
+
+def get_top_debate_tweets():
+    """Main processing: Combine all searches, dedupe, score, and split by team"""
+    
+    # Run 4 searches
+    broncos_normal = search_viral_tweets(BRONCOS_KEYWORDS, debate_mode=False)
+    broncos_debate = search_viral_tweets(BRONCOS_KEYWORDS, debate_mode=True)
+    nuggets_normal = search_viral_tweets(NUGGETS_KEYWORDS, debate_mode=False)
+    nuggets_debate = search_viral_tweets(NUGGETS_KEYWORDS, debate_mode=True)
+    
+    all_tweets = []
+    seen_ids = set()
+    all_users = {}
+    
+    # Process all 4 search results
+    for tweets_obj in [broncos_normal, broncos_debate, nuggets_normal, nuggets_debate]:
+        if not tweets_obj or not tweets_obj.data:
+            continue
         
-        if not tweets.data:
-            return []
+        # Collect users
+        if hasattr(tweets_obj, 'includes') and tweets_obj.includes and 'users' in tweets_obj.includes:
+            for user in tweets_obj.includes['users']:
+                all_users[user.id] = user
         
-        users = {user.id: user for user in tweets.includes['users']}
-        scored_tweets = []
-        
-        for tweet in tweets.data:
+        # Process tweets
+        for tweet in tweets_obj.data:
+            # Skip duplicates
+            if tweet.id in seen_ids:
+                continue
+            
             metrics = tweet.public_metrics
             
-            # SPAM FILTER
+            # Apply filters
             if is_spam_tweet(tweet, metrics):
                 continue
             
-            # RETWEET FILTER
             if not is_original_tweet(tweet):
                 continue
             
-            # CALCULATE DEBATE SCORE (replies-heavy)
+            # Calculate debate score
             score = calculate_debate_score(metrics, tweet.text)
             priority_info = determine_priority(tweet.text)
             
-            user = users.get(tweet.author_id)
+            user = all_users.get(tweet.author_id)
             
-            scored_tweets.append({
+            all_tweets.append({
                 'id': tweet.id,
                 'text': tweet.text,
                 'author': user.username if user else 'Unknown',
@@ -226,14 +259,37 @@ def search_viral_tweets(keywords, hours=None, debate_mode=False):
                 'debate_score': score,
                 'priority': priority_info
             })
+            
+            seen_ids.add(tweet.id)
+    
+    # Sort all tweets by debate score
+    all_tweets.sort(key=lambda x: x['debate_score'], reverse=True)
+    
+    # Split back into Broncos vs Nuggets based on keyword matching
+    broncos_keywords_lower = [k.lower() for k in BRONCOS_KEYWORDS]
+    nuggets_keywords_lower = [k.lower() for k in NUGGETS_KEYWORDS]
+    
+    broncos_top = []
+    nuggets_top = []
+    
+    for tweet in all_tweets:
+        text_lower = tweet['text'].lower()
         
-        # Sort by debate_score descending
-        scored_tweets.sort(key=lambda x: x['debate_score'], reverse=True)
-        return scored_tweets
+        # Check if it matches Broncos keywords
+        is_broncos = any(kw in text_lower for kw in broncos_keywords_lower)
+        is_nuggets = any(kw in text_lower for kw in nuggets_keywords_lower)
         
-    except Exception as e:
-        st.error(f"Error: {str(e)}")
-        return []
+        # Prioritize Broncos if both match
+        if is_broncos and len(broncos_top) < 10:
+            broncos_top.append(tweet)
+        elif is_nuggets and len(nuggets_top) < 5:
+            nuggets_top.append(tweet)
+        
+        # Stop when we have enough
+        if len(broncos_top) >= 10 and len(nuggets_top) >= 5:
+            break
+    
+    return broncos_top, nuggets_top
 
 def fetch_tweet_media(tweet_id):
     """Fetch media for a specific tweet"""
@@ -338,60 +394,8 @@ Keep it under 280 characters. Sound like Tyler - insider perspective, conversati
 if st.button("🔍 Scan for Viral Broncos & Nuggets Debates", use_container_width=True):
     with st.spinner("Scanning Twitter for controversial Broncos & Nuggets content..."):
         
-        # BRONCOS: Two searches - normal + debate mode
-        broncos_keywords = [
-            "#Broncos",
-            "#BroncosCountry",
-            "Broncos",
-            "Denver Broncos",
-            "Bo Nix",
-            "Surtain",
-            "Sean Payton"
-        ]
-        
-        # Search 1: Normal relevancy
-        broncos_normal = search_viral_tweets(broncos_keywords, debate_mode=False)
-        
-        # Search 2: Debate mode (controversial terms)
-        broncos_debate = search_viral_tweets(broncos_keywords, debate_mode=True)
-        
-        # Combine and deduplicate
-        seen_ids = set()
-        broncos_tweets = []
-        for tweet in broncos_normal + broncos_debate:
-            if tweet['id'] not in seen_ids:
-                seen_ids.add(tweet['id'])
-                broncos_tweets.append(tweet)
-        
-        # Re-sort combined list by debate score
-        broncos_tweets.sort(key=lambda x: x['debate_score'], reverse=True)
-        
-        # NUGGETS: Two searches - normal + debate mode
-        nuggets_keywords = [
-            "#Nuggets",
-            "Nuggets",
-            "Denver Nuggets",
-            "Jokic"
-        ]
-        
-        # Debate terms for Nuggets
-        nuggets_normal = search_viral_tweets(nuggets_keywords, debate_mode=False)
-        
-        # For Nuggets, add "Jokic flop", "Nuggets choke" in debate mode
-        nuggets_debate = search_viral_tweets(nuggets_keywords, debate_mode=True)
-        
-        # Combine and deduplicate
-        seen_ids_nuggets = set()
-        nuggets_tweets = []
-        for tweet in nuggets_normal + nuggets_debate:
-            if tweet['id'] not in seen_ids_nuggets:
-                seen_ids_nuggets.add(tweet['id'])
-                nuggets_tweets.append(tweet)
-        
-        nuggets_tweets.sort(key=lambda x: x['debate_score'], reverse=True)
-        
-        top_broncos = broncos_tweets[:10]
-        top_nuggets = nuggets_tweets[:5]
+        # Get top tweets from all searches combined
+        top_broncos, top_nuggets = get_top_debate_tweets()
         
         if top_broncos or top_nuggets:
             st.success(f"✅ Found {len(top_broncos)} Broncos + {len(top_nuggets)} Nuggets debates!")
@@ -495,4 +499,4 @@ if st.button("🔍 Scan for Viral Broncos & Nuggets Debates", use_container_widt
                     
                     st.markdown("---")
         else:
-            st.warning("No tweets found in the last 36 hours.")
+            st.warning("⚠️ No viral debates found in the last 36 hours. Try again later!")
