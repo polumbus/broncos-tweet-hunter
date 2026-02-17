@@ -4,6 +4,7 @@ from anthropic import Anthropic
 from datetime import datetime, timedelta
 import os
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 
 # ========================================
 # PRODUCTION MODE
@@ -667,14 +668,182 @@ if st.session_state.current_broncos_tweets or st.session_state.current_nuggets_t
         top_3_count = min(3, len(top_broncos))
         if top_3_count > 0:
             st.markdown("### ⭐ TOP 3 BRONCOS PICKS")
+            
+            # Generate all TOP 3 rewrites concurrently (parallel) - MUCH FASTER!
+            top_3_tweets = top_broncos[:top_3_count]
+            
+            # Check if we need to generate rewrites
+            need_generation = any(f"rewrites_top{i}" not in st.session_state for i in range(top_3_count))
+            
+            if need_generation:
+                with st.spinner(f"🚀 Generating rewrites for TOP 3 in parallel..."):
+                    def generate_for_index(idx):
+                        return idx, generate_rewrites(top_3_tweets[idx]['text'])
+                    
+                    # Run all 3 API calls at the same time!
+                    with ThreadPoolExecutor(max_workers=3) as executor:
+                        futures = [executor.submit(generate_for_index, i) for i in range(top_3_count)]
+                        for future in futures:
+                            idx, rewrites = future.result()
+                            st.session_state[f"rewrites_top{idx}"] = rewrites
+            
+            # Display all TOP 3 with their rewrites
             for i in range(top_3_count):
-                tweet = top_broncos[i]
+                tweet = top_3_tweets[i]
                 display_tweet_card(tweet, is_top_pick=True, pick_number=i+1)
                 
-                # Auto-generate rewrites for TOP 3 only (fast!)
-                with st.spinner(f"Generating rewrites {i+1}/3..."):
-                    rewrites = generate_rewrites(tweet['text'])
+                # Show rewrites (already generated)
+                rewrite_key = f"rewrites_top{i}"
+                if rewrite_key in st.session_state:
+                    rewrites = st.session_state[rewrite_key]
+                    st.markdown("**✍️ Your Rewrites (edit before copying):**")
+                    
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.markdown("**Default:**")
+                        edited_default = st.text_area(
+                            "Default",
+                            value=rewrites['Default'],
+                            height=100,
+                            key=f"edit_default_top{i}",
+                            label_visibility="collapsed"
+                        )
+                        if st.button("📋 Copy Default", key=f"copy_default_top{i}", use_container_width=True):
+                            st.code(edited_default, language=None)
+                        
+                        st.markdown("**Analytical:**")
+                        edited_analytical = st.text_area(
+                            "Analytical",
+                            value=rewrites['Analytical'],
+                            height=100,
+                            key=f"edit_analytical_top{i}",
+                            label_visibility="collapsed"
+                        )
+                        if st.button("📋 Copy Analytical", key=f"copy_analytical_top{i}", use_container_width=True):
+                            st.code(edited_analytical, language=None)
+                    
+                    with col2:
+                        st.markdown("**Controversial:**")
+                        edited_controversial = st.text_area(
+                            "Controversial",
+                            value=rewrites['Controversial'],
+                            height=100,
+                            key=f"edit_controversial_top{i}",
+                            label_visibility="collapsed"
+                        )
+                        if st.button("📋 Copy Controversial", key=f"copy_controversial_top{i}", use_container_width=True):
+                            st.code(edited_controversial, language=None)
+                        
+                        st.markdown("**Personal:**")
+                        edited_personal = st.text_area(
+                            "Personal",
+                            value=rewrites['Personal'],
+                            height=100,
+                            key=f"edit_personal_top{i}",
+                            label_visibility="collapsed"
+                        )
+                        if st.button("📋 Copy Personal", key=f"copy_personal_top{i}", use_container_width=True):
+                            st.code(edited_personal, language=None)
                 
+                st.markdown("---")
+        
+        if len(top_broncos) > 3:
+            st.markdown("### 🏈 OTHER BRONCOS TWEETS")
+            for idx, tweet in enumerate(top_broncos[3:], start=3):
+                display_tweet_card(tweet, is_top_pick=False)
+                
+                # Button to generate rewrites on demand
+                rewrite_key = f"rewrites_b{idx}"
+                
+                # Always show button (changes text if already generated)
+                if rewrite_key in st.session_state:
+                    button_text = "🔄 Regenerate Rewrites"
+                else:
+                    button_text = "✨ Generate Rewrites"
+                
+                if st.button(button_text, key=f"gen_b{idx}", use_container_width=True):
+                    with st.spinner("Generating rewrites..."):
+                        st.session_state[rewrite_key] = generate_rewrites(tweet['text'])
+                        st.rerun()
+                
+                # Show rewrites if generated
+                if rewrite_key in st.session_state:
+                    rewrites = st.session_state[rewrite_key]
+                    st.markdown("**✍️ Your Rewrites (edit before copying):**")
+                    
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.markdown("**Default:**")
+                        edited_default = st.text_area(
+                            "Default",
+                            value=rewrites['Default'],
+                            height=100,
+                            key=f"edit_default_b{idx}",
+                            label_visibility="collapsed"
+                        )
+                        if st.button("📋 Copy Default", key=f"copy_default_b{idx}", use_container_width=True):
+                            st.code(edited_default, language=None)
+                        
+                        st.markdown("**Analytical:**")
+                        edited_analytical = st.text_area(
+                            "Analytical",
+                            value=rewrites['Analytical'],
+                            height=100,
+                            key=f"edit_analytical_b{idx}",
+                            label_visibility="collapsed"
+                        )
+                        if st.button("📋 Copy Analytical", key=f"copy_analytical_b{idx}", use_container_width=True):
+                            st.code(edited_analytical, language=None)
+                    
+                    with col2:
+                        st.markdown("**Controversial:**")
+                        edited_controversial = st.text_area(
+                            "Controversial",
+                            value=rewrites['Controversial'],
+                            height=100,
+                            key=f"edit_controversial_b{idx}",
+                            label_visibility="collapsed"
+                        )
+                        if st.button("📋 Copy Controversial", key=f"copy_controversial_b{idx}", use_container_width=True):
+                            st.code(edited_controversial, language=None)
+                        
+                        st.markdown("**Personal:**")
+                        edited_personal = st.text_area(
+                            "Personal",
+                            value=rewrites['Personal'],
+                            height=100,
+                            key=f"edit_personal_b{idx}",
+                            label_visibility="collapsed"
+                        )
+                        if st.button("📋 Copy Personal", key=f"copy_personal_b{idx}", use_container_width=True):
+                            st.code(edited_personal, language=None)
+                
+                st.markdown("---")
+    
+    if top_nuggets:
+        st.markdown("### 🏀 NUGGETS TWEETS")
+        for idx, tweet in enumerate(top_nuggets):
+            display_tweet_card(tweet, is_top_pick=False)
+            
+            # Button to generate rewrites on demand
+            rewrite_key = f"rewrites_n{idx}"
+            
+            # Always show button (changes text if already generated)
+            if rewrite_key in st.session_state:
+                button_text = "🔄 Regenerate Rewrites"
+            else:
+                button_text = "✨ Generate Rewrites"
+            
+            if st.button(button_text, key=f"gen_n{idx}", use_container_width=True):
+                with st.spinner("Generating rewrites..."):
+                    st.session_state[rewrite_key] = generate_rewrites(tweet['text'])
+                    st.rerun()
+            
+            # Show rewrites if generated
+            if rewrite_key in st.session_state:
+                rewrites = st.session_state[rewrite_key]
                 st.markdown("**✍️ Your Rewrites (edit before copying):**")
                 
                 col1, col2 = st.columns(2)
@@ -685,10 +854,10 @@ if st.session_state.current_broncos_tweets or st.session_state.current_nuggets_t
                         "Default",
                         value=rewrites['Default'],
                         height=100,
-                        key=f"edit_default_top{i}",
+                        key=f"edit_default_n{idx}",
                         label_visibility="collapsed"
                     )
-                    if st.button("📋 Copy Default", key=f"copy_default_top{i}", use_container_width=True):
+                    if st.button("📋 Copy Default", key=f"copy_default_n{idx}", use_container_width=True):
                         st.code(edited_default, language=None)
                     
                     st.markdown("**Analytical:**")
@@ -696,10 +865,10 @@ if st.session_state.current_broncos_tweets or st.session_state.current_nuggets_t
                         "Analytical",
                         value=rewrites['Analytical'],
                         height=100,
-                        key=f"edit_analytical_top{i}",
+                        key=f"edit_analytical_n{idx}",
                         label_visibility="collapsed"
                     )
-                    if st.button("📋 Copy Analytical", key=f"copy_analytical_top{i}", use_container_width=True):
+                    if st.button("📋 Copy Analytical", key=f"copy_analytical_n{idx}", use_container_width=True):
                         st.code(edited_analytical, language=None)
                 
                 with col2:
@@ -708,10 +877,10 @@ if st.session_state.current_broncos_tweets or st.session_state.current_nuggets_t
                         "Controversial",
                         value=rewrites['Controversial'],
                         height=100,
-                        key=f"edit_controversial_top{i}",
+                        key=f"edit_controversial_n{idx}",
                         label_visibility="collapsed"
                     )
-                    if st.button("📋 Copy Controversial", key=f"copy_controversial_top{i}", use_container_width=True):
+                    if st.button("📋 Copy Controversial", key=f"copy_controversial_n{idx}", use_container_width=True):
                         st.code(edited_controversial, language=None)
                     
                     st.markdown("**Personal:**")
@@ -719,24 +888,12 @@ if st.session_state.current_broncos_tweets or st.session_state.current_nuggets_t
                         "Personal",
                         value=rewrites['Personal'],
                         height=100,
-                        key=f"edit_personal_top{i}",
+                        key=f"edit_personal_n{idx}",
                         label_visibility="collapsed"
                     )
-                    if st.button("📋 Copy Personal", key=f"copy_personal_top{i}", use_container_width=True):
+                    if st.button("📋 Copy Personal", key=f"copy_personal_n{idx}", use_container_width=True):
                         st.code(edited_personal, language=None)
-                
-                st.markdown("---")
-        
-        if len(top_broncos) > 3:
-            st.markdown("### 🏈 OTHER BRONCOS TWEETS")
-            for idx, tweet in enumerate(top_broncos[3:], start=3):
-                display_tweet_card(tweet, is_top_pick=False)
-                st.markdown("---")
-    
-    if top_nuggets:
-        st.markdown("### 🏀 NUGGETS TWEETS")
-        for idx, tweet in enumerate(top_nuggets):
-            display_tweet_card(tweet, is_top_pick=False)
+            
             st.markdown("---")
 else:
     # No tweets in session state yet
