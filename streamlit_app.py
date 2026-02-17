@@ -3,6 +3,7 @@ import tweepy
 from anthropic import Anthropic
 from datetime import datetime, timedelta
 import os
+from collections import defaultdict
 
 # ========================================
 # PRODUCTION MODE
@@ -50,6 +51,15 @@ st.markdown("""
         font-size: 11px;
         font-weight: bold;
         margin-left: 8px;
+    }
+    .subject-badge {
+        background-color: #2f3336;
+        color: #8899a6;
+        padding: 3px 8px;
+        border-radius: 10px;
+        font-size: 10px;
+        font-weight: bold;
+        margin-left: 6px;
     }
     .rewrite-preview {
         background-color: #1c1f23;
@@ -102,6 +112,86 @@ BRONCOS_KEYWORDS = [
 NUGGETS_KEYWORDS = [
     "#Nuggets", "Nuggets", "Denver Nuggets", "Jokic"
 ]
+
+def extract_subjects(tweet_text):
+    """Extract key subjects/topics from tweet - returns set of subject strings"""
+    text_lower = tweet_text.lower()
+    subjects = set()
+    
+    # BRONCOS PLAYERS
+    if any(kw in text_lower for kw in ["bo nix", "nix", "bo-nix", "bonix"]):
+        subjects.add("Bo Nix")
+    if any(kw in text_lower for kw in ["patrick surtain", "surtain", "ps2"]):
+        subjects.add("Patrick Surtain")
+    if any(kw in text_lower for kw in ["courtland sutton", "sutton"]):
+        subjects.add("Courtland Sutton")
+    if any(kw in text_lower for kw in ["javonte williams", "javonte"]):
+        subjects.add("Javonte Williams")
+    if any(kw in text_lower for kw in ["russell wilson", "russ wilson", "russ"]):
+        subjects.add("Russell Wilson")
+    if any(kw in text_lower for kw in ["riley moss"]):
+        subjects.add("Riley Moss")
+    if any(kw in text_lower for kw in ["troy franklin", "franklin"]):
+        subjects.add("Troy Franklin")
+    
+    # BRONCOS COACHES/STAFF
+    if any(kw in text_lower for kw in ["sean payton", "payton", "coach payton"]):
+        subjects.add("Sean Payton")
+    if any(kw in text_lower for kw in ["vance joseph", "vance"]):
+        subjects.add("Vance Joseph")
+    
+    # BRONCOS TOPICS
+    if any(kw in text_lower for kw in ["fire payton", "payton out", "fire sean"]):
+        subjects.add("Fire Payton")
+    if any(kw in text_lower for kw in ["qb", "quarterback"]):
+        subjects.add("QB Discussion")
+    if any(kw in text_lower for kw in ["defense", "defensive", "no fly zone"]):
+        subjects.add("Defense")
+    if any(kw in text_lower for kw in ["offense", "offensive"]):
+        subjects.add("Offense")
+    if "draft" in text_lower:
+        subjects.add("Draft")
+    if any(kw in text_lower for kw in ["playoffs", "playoff"]):
+        subjects.add("Playoffs")
+    
+    # NUGGETS PLAYERS
+    if any(kw in text_lower for kw in ["nikola jokic", "jokic", "joker"]):
+        subjects.add("Nikola Jokic")
+    if any(kw in text_lower for kw in ["jamal murray", "murray"]):
+        subjects.add("Jamal Murray")
+    if any(kw in text_lower for kw in ["aaron gordon", "ag", "gordon"]):
+        subjects.add("Aaron Gordon")
+    if any(kw in text_lower for kw in ["michael porter", "mpj", "porter jr"]):
+        subjects.add("Michael Porter Jr")
+    
+    # NUGGETS TOPICS
+    if "mvp" in text_lower:
+        subjects.add("MVP")
+    if any(kw in text_lower for kw in ["rest", "resting", "load management"]):
+        subjects.add("Player Rest")
+    if any(kw in text_lower for kw in ["championship", "title", "ring"]):
+        subjects.add("Championship")
+    
+    # GENERAL TOPICS (cross-team)
+    if any(kw in text_lower for kw in ["trade", "traded", "trading"]):
+        subjects.add("Trade Talk")
+    if any(kw in text_lower for kw in ["aj brown", "a.j. brown"]):
+        subjects.add("AJ Brown")
+    if any(kw in text_lower for kw in ["contract", "extension", "deal"]):
+        subjects.add("Contract")
+    if any(kw in text_lower for kw in ["injury", "injured", "hurt"]):
+        subjects.add("Injury")
+    
+    # Fallback: if no specific subject identified
+    if not subjects:
+        if "broncos" in text_lower:
+            subjects.add("General Broncos")
+        elif "nuggets" in text_lower or "jokic" in text_lower:
+            subjects.add("General Nuggets")
+        else:
+            subjects.add("Other")
+    
+    return subjects
 
 def determine_priority(tweet_text):
     """Determine ranking priority based on content"""
@@ -204,7 +294,7 @@ def search_viral_tweets(keywords, hours=36, debate_mode=False):
         return None
 
 def get_top_debate_tweets():
-    """Main processing: Combine all searches, dedupe, score, and split by team"""
+    """Main processing: Combine searches, dedupe, score, and enforce subject diversity"""
     
     # Run 4 searches
     broncos_normal = search_viral_tweets(BRONCOS_KEYWORDS, debate_mode=False)
@@ -245,6 +335,9 @@ def get_top_debate_tweets():
             score = calculate_debate_score(metrics, tweet.text)
             priority_info = determine_priority(tweet.text)
             
+            # Extract subjects for diversity tracking
+            subjects = extract_subjects(tweet.text)
+            
             user = all_users.get(tweet.author_id)
             
             all_tweets.append({
@@ -257,7 +350,8 @@ def get_top_debate_tweets():
                 'retweets': metrics['retweet_count'],
                 'replies': metrics['reply_count'],
                 'debate_score': score,
-                'priority': priority_info
+                'priority': priority_info,
+                'subjects': subjects  # Store subjects for diversity
             })
             
             seen_ids.add(tweet.id)
@@ -265,31 +359,91 @@ def get_top_debate_tweets():
     # Sort all tweets by debate score
     all_tweets.sort(key=lambda x: x['debate_score'], reverse=True)
     
-    # Split back into Broncos vs Nuggets based on keyword matching
+    # DIVERSITY ENFORCEMENT: Max 2 tweets per subject
     broncos_keywords_lower = [k.lower() for k in BRONCOS_KEYWORDS]
     nuggets_keywords_lower = [k.lower() for k in NUGGETS_KEYWORDS]
     
-    broncos_top = []
-    nuggets_top = []
+    final_broncos = []
+    final_nuggets = []
+    subject_count_broncos = defaultdict(int)
+    subject_count_nuggets = defaultdict(int)
+    
+    broncos_backup = []
+    nuggets_backup = []
     
     for tweet in all_tweets:
         text_lower = tweet['text'].lower()
         
-        # Check if it matches Broncos keywords
+        # Determine if Broncos or Nuggets
         is_broncos = any(kw in text_lower for kw in broncos_keywords_lower)
         is_nuggets = any(kw in text_lower for kw in nuggets_keywords_lower)
         
-        # Prioritize Broncos if both match
-        if is_broncos and len(broncos_top) < 10:
-            broncos_top.append(tweet)
-        elif is_nuggets and len(nuggets_top) < 5:
-            nuggets_top.append(tweet)
+        # Process Broncos tweets
+        if is_broncos and len(final_broncos) < 10:
+            # Check if any subject would exceed limit of 2
+            can_add = True
+            for subj in tweet['subjects']:
+                if subject_count_broncos[subj] >= 2:
+                    can_add = False
+                    break
+            
+            if can_add:
+                final_broncos.append(tweet)
+                for subj in tweet['subjects']:
+                    subject_count_broncos[subj] += 1
+            else:
+                broncos_backup.append(tweet)
         
-        # Stop when we have enough
-        if len(broncos_top) >= 10 and len(nuggets_top) >= 5:
-            break
+        # Process Nuggets tweets
+        elif is_nuggets and len(final_nuggets) < 5:
+            # Check if any subject would exceed limit of 2
+            can_add = True
+            for subj in tweet['subjects']:
+                if subject_count_nuggets[subj] >= 2:
+                    can_add = False
+                    break
+            
+            if can_add:
+                final_nuggets.append(tweet)
+                for subj in tweet['subjects']:
+                    subject_count_nuggets[subj] += 1
+            else:
+                nuggets_backup.append(tweet)
     
-    return broncos_top, nuggets_top
+    # FALLBACK: If short, relax to 3 max per subject
+    if len(final_broncos) < 8 and broncos_backup:
+        for tweet in broncos_backup:
+            if len(final_broncos) >= 10:
+                break
+            
+            can_add = True
+            for subj in tweet['subjects']:
+                if subject_count_broncos[subj] >= 3:  # Relaxed to 3
+                    can_add = False
+                    break
+            
+            if can_add:
+                final_broncos.append(tweet)
+                for subj in tweet['subjects']:
+                    subject_count_broncos[subj] += 1
+    
+    if len(final_nuggets) < 4 and nuggets_backup:
+        for tweet in nuggets_backup:
+            if len(final_nuggets) >= 5:
+                break
+            
+            can_add = True
+            for subj in tweet['subjects']:
+                if subject_count_nuggets[subj] >= 3:  # Relaxed to 3
+                    can_add = False
+                    break
+            
+            if can_add:
+                final_nuggets.append(tweet)
+                for subj in tweet['subjects']:
+                    subject_count_nuggets[subj] += 1
+    
+    return final_broncos, final_nuggets
 
 def fetch_tweet_media(tweet_id):
     """Fetch media for a specific tweet"""
@@ -313,6 +467,9 @@ def display_tweet_card(tweet, is_top_pick=False, pick_number=None):
     # Check if it's a hot debate (high replies)
     is_debate = tweet['replies'] >= 10
     
+    # Get primary subject for badge
+    primary_subject = list(tweet['subjects'])[0] if tweet['subjects'] else "General"
+    
     with st.container():
         if is_top_pick:
             st.markdown(f'<span class="top-pick-badge">⭐ TOP PICK #{pick_number}</span>', unsafe_allow_html=True)
@@ -324,6 +481,9 @@ def display_tweet_card(tweet, is_top_pick=False, pick_number=None):
         
         if is_debate:
             header_html += f'<span class="debate-badge">🔥 {tweet["replies"]} replies</span>'
+        
+        # Show primary subject
+        header_html += f'<span class="subject-badge">📌 {primary_subject}</span>'
         
         header_html += f'''
                 <br>
@@ -394,11 +554,11 @@ Keep it under 280 characters. Sound like Tyler - insider perspective, conversati
 if st.button("🔍 Scan for Viral Broncos & Nuggets Debates", use_container_width=True):
     with st.spinner("Scanning Twitter for controversial Broncos & Nuggets content..."):
         
-        # Get top tweets from all searches combined
+        # Get top tweets with diversity enforcement
         top_broncos, top_nuggets = get_top_debate_tweets()
         
         if top_broncos or top_nuggets:
-            st.success(f"✅ Found {len(top_broncos)} Broncos + {len(top_nuggets)} Nuggets debates!")
+            st.success(f"✅ Found {len(top_broncos)} Broncos + {len(top_nuggets)} Nuggets debates with max variety!")
             
             if top_broncos:
                 top_3_count = min(3, len(top_broncos))
