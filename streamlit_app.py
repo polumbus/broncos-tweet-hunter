@@ -585,37 +585,51 @@ def display_tweet_card(tweet, is_top_pick=False, pick_number=None):
         st.markdown(f'<a href="{tweet_url}" target="_blank" style="color: #1d9bf0; text-decoration: none;">🔗 View on Twitter →</a>', unsafe_allow_html=True)
 
 def generate_rewrites(original_tweet):
-    """Generate all 4 rewrite styles at once"""
-    styles = {
-        "Default": "Rewrite this tweet in Tyler's voice as a Broncos analyst. Keep it punchy and real.",
-        "Analytical": "Rewrite with deep analysis. What would a former player see that others don't?",
-        "Controversial": "Rewrite as a spicy take. Call out bad decisions. Make it debatable.",
-        "Personal": "Rewrite with personal playing experience. Reference the locker room."
-    }
+    """Generate all 4 rewrite styles at once using Haiku with prompt caching"""
     
-    rewrites = {}
+    # FIXED SYSTEM PROMPT (cached across calls - THE SPEED MAGIC!)
+    system_prompt = [
+        {
+            "type": "text",
+            "text": "You are Tyler Polumbus, former Denver Broncos player and current radio/podcast host. Rewrite viral tweets in your authentic voice."
+        },
+        {
+            "type": "text",
+            "text": """Generate 4 versions for every tweet:
+1. DEFAULT: Clean sports-radio voice
+2. ANALYTICAL: Film/Stats breakdown
+3. CONTROVERSIAL: Spicy hot take
+4. PERSONAL: First-person NFL experience
+
+Return ONLY valid JSON: {"Default": "...", "Analytical": "...", "Controversial": "...", "Personal": "..."}""",
+            "cache_control": {"type": "ephemeral"}   # Cache this instruction block!
+        }
+    ]
     
-    for style_name, prompt in styles.items():
-        try:
-            message = client.messages.create(
-                model="claude-sonnet-4-5-20250929",
-                max_tokens=280,
-                messages=[{
-                    "role": "user",
-                    "content": f"""You are Tyler, a Denver Broncos analyst and former player.
-
-Original tweet: "{original_tweet}"
-
-{prompt}
-
-Keep it under 280 characters. Sound like Tyler - insider perspective, conversational, punchy."""
-                }]
-            )
-            rewrites[style_name] = message.content[0].text
-        except Exception as e:
-            rewrites[style_name] = f"ERROR: {str(e)}"
+    user_prompt = f"Original tweet:\n{original_tweet}"
     
-    return rewrites
+    try:
+        message = client.messages.create(
+            model="claude-haiku-4-20250514",   # Haiku is 3-5x faster than Sonnet!
+            max_tokens=800,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_prompt}]
+        )
+        
+        response_text = message.content[0].text
+        clean_response = response_text.replace('```json', '').replace('```', '').strip()
+        
+        import json
+        rewrites = json.loads(clean_response)
+        return rewrites
+    except Exception as e:
+        # Fallback if JSON parsing fails
+        return {
+            "Default": f"ERROR: {str(e)}",
+            "Analytical": f"ERROR: {str(e)}",
+            "Controversial": f"ERROR: {str(e)}",
+            "Personal": f"ERROR: {str(e)}"
+        }
 
 # Button section
 col1, col2, col3 = st.columns([2, 2, 1])
