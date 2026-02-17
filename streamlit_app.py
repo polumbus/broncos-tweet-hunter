@@ -117,9 +117,6 @@ st.caption(f"Find the most controversial Denver Broncos & Nuggets debates from t
 if 'shown_tweet_ids' not in st.session_state:
     st.session_state.shown_tweet_ids = set()
 
-if 'edited_tweets' not in st.session_state:
-    st.session_state.edited_tweets = {}
-
 if 'generated_rewrites' not in st.session_state:
     st.session_state.generated_rewrites = {}
 
@@ -559,34 +556,7 @@ def display_tweet_card(tweet, is_top_pick=False, pick_number=None):
         
         st.markdown(header_html, unsafe_allow_html=True)
         
-        # Original tweet text
-        st.markdown(f'<div style="font-size: 15px; line-height: 20px; color: #e7e9ea; margin-bottom: 8px;"><strong>Original:</strong></div>', unsafe_allow_html=True)
         st.markdown(f'<div style="font-size: 15px; line-height: 20px; color: #e7e9ea; margin-bottom: 12px;">{tweet["text"]}</div>', unsafe_allow_html=True)
-        
-        # Editable version
-        tweet_id = tweet['id']
-        if tweet_id not in st.session_state.edited_tweets:
-            st.session_state.edited_tweets[tweet_id] = tweet['text']
-        
-        edited_text = st.text_area(
-            "✏️ Edit tweet before generating rewrites:",
-            value=st.session_state.edited_tweets[tweet_id],
-            height=100,
-            key=f"edit_{tweet_id}",
-            help="Modify the tweet text, then click 'Generate Rewrites' below"
-        )
-        
-        # Update session state when text changes
-        st.session_state.edited_tweets[tweet_id] = edited_text
-        
-        col_reset, col_space = st.columns([1, 3])
-        with col_reset:
-            if st.button("↺ Reset", key=f"reset_{tweet_id}"):
-                st.session_state.edited_tweets[tweet_id] = tweet['text']
-                st.rerun()
-        
-        # Return the edited text for use in rewrites
-        tweet['edited_text'] = edited_text
         
         media = fetch_tweet_media(tweet['id'])
         if media:
@@ -655,7 +625,6 @@ with col2:
 with col3:
     if st.button("🗑️ Clear History"):
         st.session_state.shown_tweet_ids = set()
-        st.session_state.edited_tweets = {}
         st.session_state.generated_rewrites = {}
         st.success("History cleared!")
         st.rerun()
@@ -690,39 +659,65 @@ if scan_button or scan_new_button:
                         tweet = top_broncos[i]
                         display_tweet_card(tweet, is_top_pick=True, pick_number=i+1)
                         
-                        # Use edited text if available, otherwise original
-                        text_to_rewrite = tweet.get('edited_text', tweet['text'])
                         tweet_key = f"top{i}"
                         
                         if st.button(f"✨ Generate Rewrites", key=f"gen_{tweet_key}", use_container_width=True):
                             with st.spinner("Generating rewrites in your voice..."):
-                                rewrites = generate_rewrites(text_to_rewrite)
+                                rewrites = generate_rewrites(tweet['text'])
                                 st.session_state.generated_rewrites[tweet_key] = rewrites
                         
                         # Display rewrites if they exist
                         if tweet_key in st.session_state.generated_rewrites:
                             rewrites = st.session_state.generated_rewrites[tweet_key]
-                            st.markdown("**✍️ Your Rewrites:**")
+                            st.markdown("**✍️ Your Rewrites (editable):**")
                             
                             col1, col2 = st.columns(2)
                             
                             with col1:
-                                st.markdown(f"<div class='rewrite-preview'><strong>Default:</strong><br>{rewrites['Default']}</div>", unsafe_allow_html=True)
-                                if st.button("📋 Copy", key=f"copy_default_{tweet_key}"):
-                                    st.code(rewrites['Default'], language=None)
+                                st.markdown("**Default:**")
+                                edited_default = st.text_area(
+                                    "Default style",
+                                    value=rewrites['Default'],
+                                    height=100,
+                                    key=f"edit_default_{tweet_key}",
+                                    label_visibility="collapsed"
+                                )
+                                if st.button("📋 Copy Default", key=f"copy_default_{tweet_key}", use_container_width=True):
+                                    st.code(edited_default, language=None)
                                 
-                                st.markdown(f"<div class='rewrite-preview'><strong>Analytical:</strong><br>{rewrites['Analytical']}</div>", unsafe_allow_html=True)
-                                if st.button("📋 Copy", key=f"copy_analytical_{tweet_key}"):
-                                    st.code(rewrites['Analytical'], language=None)
+                                st.markdown("**Analytical:**")
+                                edited_analytical = st.text_area(
+                                    "Analytical style",
+                                    value=rewrites['Analytical'],
+                                    height=100,
+                                    key=f"edit_analytical_{tweet_key}",
+                                    label_visibility="collapsed"
+                                )
+                                if st.button("📋 Copy Analytical", key=f"copy_analytical_{tweet_key}", use_container_width=True):
+                                    st.code(edited_analytical, language=None)
                             
                             with col2:
-                                st.markdown(f"<div class='rewrite-preview'><strong>Controversial:</strong><br>{rewrites['Controversial']}</div>", unsafe_allow_html=True)
-                                if st.button("📋 Copy", key=f"copy_controversial_{tweet_key}"):
-                                    st.code(rewrites['Controversial'], language=None)
+                                st.markdown("**Controversial:**")
+                                edited_controversial = st.text_area(
+                                    "Controversial style",
+                                    value=rewrites['Controversial'],
+                                    height=100,
+                                    key=f"edit_controversial_{tweet_key}",
+                                    label_visibility="collapsed"
+                                )
+                                if st.button("📋 Copy Controversial", key=f"copy_controversial_{tweet_key}", use_container_width=True):
+                                    st.code(edited_controversial, language=None)
                                 
-                                st.markdown(f"<div class='rewrite-preview'><strong>Personal:</strong><br>{rewrites['Personal']}</div>", unsafe_allow_html=True)
-                                if st.button("📋 Copy", key=f"copy_personal_{tweet_key}"):
-                                    st.code(rewrites['Personal'], language=None)
+                                st.markdown("**Personal:**")
+                                edited_personal = st.text_area(
+                                    "Personal style",
+                                    value=rewrites['Personal'],
+                                    height=100,
+                                    key=f"edit_personal_{tweet_key}",
+                                    label_visibility="collapsed"
+                                )
+                                if st.button("📋 Copy Personal", key=f"copy_personal_{tweet_key}", use_container_width=True):
+                                    st.code(edited_personal, language=None)
                         
                         st.markdown("---")
                 
@@ -731,39 +726,65 @@ if scan_button or scan_new_button:
                     for idx, tweet in enumerate(top_broncos[3:], start=3):
                         display_tweet_card(tweet, is_top_pick=False)
                         
-                        # Use edited text if available, otherwise original
-                        text_to_rewrite = tweet.get('edited_text', tweet['text'])
                         tweet_key = f"b{idx}"
                         
                         if st.button(f"✨ Generate Rewrites", key=f"gen_{tweet_key}", use_container_width=True):
                             with st.spinner("Generating rewrites in your voice..."):
-                                rewrites = generate_rewrites(text_to_rewrite)
+                                rewrites = generate_rewrites(tweet['text'])
                                 st.session_state.generated_rewrites[tweet_key] = rewrites
                         
                         # Display rewrites if they exist
                         if tweet_key in st.session_state.generated_rewrites:
                             rewrites = st.session_state.generated_rewrites[tweet_key]
-                            st.markdown("**✍️ Your Rewrites:**")
+                            st.markdown("**✍️ Your Rewrites (editable):**")
                             
                             col1, col2 = st.columns(2)
                             
                             with col1:
-                                st.markdown(f"<div class='rewrite-preview'><strong>Default:</strong><br>{rewrites['Default']}</div>", unsafe_allow_html=True)
-                                if st.button("📋 Copy", key=f"copy_default_{tweet_key}"):
-                                    st.code(rewrites['Default'], language=None)
+                                st.markdown("**Default:**")
+                                edited_default = st.text_area(
+                                    "Default style",
+                                    value=rewrites['Default'],
+                                    height=100,
+                                    key=f"edit_default_{tweet_key}",
+                                    label_visibility="collapsed"
+                                )
+                                if st.button("📋 Copy Default", key=f"copy_default_{tweet_key}", use_container_width=True):
+                                    st.code(edited_default, language=None)
                                 
-                                st.markdown(f"<div class='rewrite-preview'><strong>Analytical:</strong><br>{rewrites['Analytical']}</div>", unsafe_allow_html=True)
-                                if st.button("📋 Copy", key=f"copy_analytical_{tweet_key}"):
-                                    st.code(rewrites['Analytical'], language=None)
+                                st.markdown("**Analytical:**")
+                                edited_analytical = st.text_area(
+                                    "Analytical style",
+                                    value=rewrites['Analytical'],
+                                    height=100,
+                                    key=f"edit_analytical_{tweet_key}",
+                                    label_visibility="collapsed"
+                                )
+                                if st.button("📋 Copy Analytical", key=f"copy_analytical_{tweet_key}", use_container_width=True):
+                                    st.code(edited_analytical, language=None)
                             
                             with col2:
-                                st.markdown(f"<div class='rewrite-preview'><strong>Controversial:</strong><br>{rewrites['Controversial']}</div>", unsafe_allow_html=True)
-                                if st.button("📋 Copy", key=f"copy_controversial_{tweet_key}"):
-                                    st.code(rewrites['Controversial'], language=None)
+                                st.markdown("**Controversial:**")
+                                edited_controversial = st.text_area(
+                                    "Controversial style",
+                                    value=rewrites['Controversial'],
+                                    height=100,
+                                    key=f"edit_controversial_{tweet_key}",
+                                    label_visibility="collapsed"
+                                )
+                                if st.button("📋 Copy Controversial", key=f"copy_controversial_{tweet_key}", use_container_width=True):
+                                    st.code(edited_controversial, language=None)
                                 
-                                st.markdown(f"<div class='rewrite-preview'><strong>Personal:</strong><br>{rewrites['Personal']}</div>", unsafe_allow_html=True)
-                                if st.button("📋 Copy", key=f"copy_personal_{tweet_key}"):
-                                    st.code(rewrites['Personal'], language=None)
+                                st.markdown("**Personal:**")
+                                edited_personal = st.text_area(
+                                    "Personal style",
+                                    value=rewrites['Personal'],
+                                    height=100,
+                                    key=f"edit_personal_{tweet_key}",
+                                    label_visibility="collapsed"
+                                )
+                                if st.button("📋 Copy Personal", key=f"copy_personal_{tweet_key}", use_container_width=True):
+                                    st.code(edited_personal, language=None)
                         
                         st.markdown("---")
             
@@ -772,39 +793,65 @@ if scan_button or scan_new_button:
                 for idx, tweet in enumerate(top_nuggets):
                     display_tweet_card(tweet, is_top_pick=False)
                     
-                    # Use edited text if available, otherwise original
-                    text_to_rewrite = tweet.get('edited_text', tweet['text'])
                     tweet_key = f"n{idx}"
                     
                     if st.button(f"✨ Generate Rewrites", key=f"gen_{tweet_key}", use_container_width=True):
                         with st.spinner("Generating rewrites in your voice..."):
-                            rewrites = generate_rewrites(text_to_rewrite)
+                            rewrites = generate_rewrites(tweet['text'])
                             st.session_state.generated_rewrites[tweet_key] = rewrites
                     
                     # Display rewrites if they exist
                     if tweet_key in st.session_state.generated_rewrites:
                         rewrites = st.session_state.generated_rewrites[tweet_key]
-                        st.markdown("**✍️ Your Rewrites:**")
+                        st.markdown("**✍️ Your Rewrites (editable):**")
                         
                         col1, col2 = st.columns(2)
                         
                         with col1:
-                            st.markdown(f"<div class='rewrite-preview'><strong>Default:</strong><br>{rewrites['Default']}</div>", unsafe_allow_html=True)
-                            if st.button("📋 Copy", key=f"copy_default_{tweet_key}"):
-                                st.code(rewrites['Default'], language=None)
+                            st.markdown("**Default:**")
+                            edited_default = st.text_area(
+                                "Default style",
+                                value=rewrites['Default'],
+                                height=100,
+                                key=f"edit_default_{tweet_key}",
+                                label_visibility="collapsed"
+                            )
+                            if st.button("📋 Copy Default", key=f"copy_default_{tweet_key}", use_container_width=True):
+                                st.code(edited_default, language=None)
                             
-                            st.markdown(f"<div class='rewrite-preview'><strong>Analytical:</strong><br>{rewrites['Analytical']}</div>", unsafe_allow_html=True)
-                            if st.button("📋 Copy", key=f"copy_analytical_{tweet_key}"):
-                                st.code(rewrites['Analytical'], language=None)
+                            st.markdown("**Analytical:**")
+                            edited_analytical = st.text_area(
+                                "Analytical style",
+                                value=rewrites['Analytical'],
+                                height=100,
+                                key=f"edit_analytical_{tweet_key}",
+                                label_visibility="collapsed"
+                            )
+                            if st.button("📋 Copy Analytical", key=f"copy_analytical_{tweet_key}", use_container_width=True):
+                                st.code(edited_analytical, language=None)
                         
                         with col2:
-                            st.markdown(f"<div class='rewrite-preview'><strong>Controversial:</strong><br>{rewrites['Controversial']}</div>", unsafe_allow_html=True)
-                            if st.button("📋 Copy", key=f"copy_controversial_{tweet_key}"):
-                                st.code(rewrites['Controversial'], language=None)
+                            st.markdown("**Controversial:**")
+                            edited_controversial = st.text_area(
+                                "Controversial style",
+                                value=rewrites['Controversial'],
+                                height=100,
+                                key=f"edit_controversial_{tweet_key}",
+                                label_visibility="collapsed"
+                            )
+                            if st.button("📋 Copy Controversial", key=f"copy_controversial_{tweet_key}", use_container_width=True):
+                                st.code(edited_controversial, language=None)
                             
-                            st.markdown(f"<div class='rewrite-preview'><strong>Personal:</strong><br>{rewrites['Personal']}</div>", unsafe_allow_html=True)
-                            if st.button("📋 Copy", key=f"copy_personal_{tweet_key}"):
-                                st.code(rewrites['Personal'], language=None)
+                            st.markdown("**Personal:**")
+                            edited_personal = st.text_area(
+                                "Personal style",
+                                value=rewrites['Personal'],
+                                height=100,
+                                key=f"edit_personal_{tweet_key}",
+                                label_visibility="collapsed"
+                            )
+                            if st.button("📋 Copy Personal", key=f"copy_personal_{tweet_key}", use_container_width=True):
+                                st.code(edited_personal, language=None)
                     
                     st.markdown("---")
         else:
