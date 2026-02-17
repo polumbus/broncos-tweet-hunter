@@ -354,11 +354,21 @@ def get_top_debate_tweets(exclude_ids=None):
     if exclude_ids is None:
         exclude_ids = set()
     
-    # Run 4 searches
-    broncos_normal = search_viral_tweets(BRONCOS_KEYWORDS, debate_mode=False)
-    broncos_debate = search_viral_tweets(BRONCOS_KEYWORDS, debate_mode=True)
-    nuggets_normal = search_viral_tweets(NUGGETS_KEYWORDS, debate_mode=False)
-    nuggets_debate = search_viral_tweets(NUGGETS_KEYWORDS, debate_mode=True)
+    # Run 4 searches IN PARALLEL! (Was: sequential, now: concurrent)
+    from concurrent.futures import ThreadPoolExecutor
+    
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        # Submit all 4 searches at once
+        future_broncos_normal = executor.submit(search_viral_tweets, BRONCOS_KEYWORDS, False)
+        future_broncos_debate = executor.submit(search_viral_tweets, BRONCOS_KEYWORDS, True)
+        future_nuggets_normal = executor.submit(search_viral_tweets, NUGGETS_KEYWORDS, False)
+        future_nuggets_debate = executor.submit(search_viral_tweets, NUGGETS_KEYWORDS, True)
+        
+        # Get results (will wait for all to complete)
+        broncos_normal = future_broncos_normal.result()
+        broncos_debate = future_broncos_debate.result()
+        nuggets_normal = future_nuggets_normal.result()
+        nuggets_debate = future_nuggets_debate.result()
     
     all_tweets = []
     seen_ids = set()
