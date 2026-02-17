@@ -27,6 +27,16 @@ st.markdown("""
         padding: 12px 24px;
         font-size: 16px;
     }
+    .stButton>button[kind="secondary"] {
+        background-color: #2f3336;
+        border: 1px solid #536471;
+    }
+    .stTextArea>div>div>textarea {
+        background-color: #16181c;
+        color: #e7e9ea;
+        border: 1px solid #2f3336;
+        border-radius: 8px;
+    }
     div[data-testid="stVerticalBlock"] > div.tweet-card {
         background-color: #16181c;
         border: 1px solid #2f3336;
@@ -103,10 +113,25 @@ client_twitter = tweepy.Client(bearer_token=os.environ["TWITTER_BEARER_TOKEN"], 
 st.title("🏈 Broncos Tweet Hunter")
 st.caption(f"Find the most controversial Denver Broncos & Nuggets debates from the last {HOURS_BACK} hours")
 
+# Initialize session state for tracking shown tweets
+if 'shown_tweet_ids' not in st.session_state:
+    st.session_state.shown_tweet_ids = set()
+
+if 'edited_tweets' not in st.session_state:
+    st.session_state.edited_tweets = {}
+
+if 'generated_rewrites' not in st.session_state:
+    st.session_state.generated_rewrites = {}
+
 # Keywords
 BRONCOS_KEYWORDS = [
-    "#Broncos", "#BroncosCountry", "Broncos", "Denver Broncos",
-    "Bo Nix", "Surtain", "Sean Payton"
+    "Denver Broncos",        # Most specific - prioritize this
+    "#Broncos",
+    "#BroncosCountry",
+    "Broncos NFL",           # Add NFL context
+    "Bo Nix",
+    "Surtain",
+    "Sean Payton"
 ]
 
 NUGGETS_KEYWORDS = [
@@ -248,6 +273,35 @@ def is_spam_tweet(tweet, metrics):
     
     return False
 
+def is_wrong_broncos_team(tweet):
+    """Filter out non-Denver Broncos teams (Brisbane Broncos rugby, etc.)"""
+    text_lower = tweet.text.lower()
+    
+    # Exclude rugby/NRL keywords
+    rugby_keywords = [
+        "rugby", "nrl", "brisbane", "queensland", "super league",
+        "world club challenge", "red hill", "suncorp stadium",
+        "reece walsh", "adam reynolds", "broncos rugby", "league"
+    ]
+    
+    if any(kw in text_lower for kw in rugby_keywords):
+        return True
+    
+    # If tweet mentions "Broncos" but no NFL/Denver context, be suspicious
+    if "broncos" in text_lower:
+        nfl_context = [
+            "denver", "nfl", "super bowl", "afc", "bo nix", 
+            "sean payton", "surtain", "mile high", "empower field",
+            "football", "quarterback", "qb", "touchdown"
+        ]
+        has_nfl_context = any(kw in text_lower for kw in nfl_context)
+        
+        # If it mentions "Broncos" but has NO NFL context, likely wrong team
+        if not has_nfl_context:
+            return True
+    
+    return False
+
 def is_original_tweet(tweet):
     """Check if tweet is original - ONLY block actual retweets"""
     if tweet.text.startswith('RT @'):
@@ -293,8 +347,11 @@ def search_viral_tweets(keywords, hours=36, debate_mode=False):
         st.error(f"Search error: {str(e)}")
         return None
 
-def get_top_debate_tweets():
+def get_top_debate_tweets(exclude_ids=None):
     """Main processing: Combine searches, dedupe, score, and enforce subject diversity"""
+    
+    if exclude_ids is None:
+        exclude_ids = set()
     
     # Run 4 searches
     broncos_normal = search_viral_tweets(BRONCOS_KEYWORDS, debate_mode=False)
@@ -322,6 +379,10 @@ def get_top_debate_tweets():
             if tweet.id in seen_ids:
                 continue
             
+            # Skip already shown tweets
+            if tweet.id in exclude_ids:
+                continue
+            
             metrics = tweet.public_metrics
             
             # Apply filters
@@ -329,6 +390,10 @@ def get_top_debate_tweets():
                 continue
             
             if not is_original_tweet(tweet):
+                continue
+            
+            # Filter out wrong Broncos team (rugby/Brisbane)
+            if is_wrong_broncos_team(tweet):
                 continue
             
             # Calculate debate score
@@ -494,7 +559,34 @@ def display_tweet_card(tweet, is_top_pick=False, pick_number=None):
         
         st.markdown(header_html, unsafe_allow_html=True)
         
+        # Original tweet text
+        st.markdown(f'<div style="font-size: 15px; line-height: 20px; color: #e7e9ea; margin-bottom: 8px;"><strong>Original:</strong></div>', unsafe_allow_html=True)
         st.markdown(f'<div style="font-size: 15px; line-height: 20px; color: #e7e9ea; margin-bottom: 12px;">{tweet["text"]}</div>', unsafe_allow_html=True)
+        
+        # Editable version
+        tweet_id = tweet['id']
+        if tweet_id not in st.session_state.edited_tweets:
+            st.session_state.edited_tweets[tweet_id] = tweet['text']
+        
+        edited_text = st.text_area(
+            "✏️ Edit tweet before generating rewrites:",
+            value=st.session_state.edited_tweets[tweet_id],
+            height=100,
+            key=f"edit_{tweet_id}",
+            help="Modify the tweet text, then click 'Generate Rewrites' below"
+        )
+        
+        # Update session state when text changes
+        st.session_state.edited_tweets[tweet_id] = edited_text
+        
+        col_reset, col_space = st.columns([1, 3])
+        with col_reset:
+            if st.button("↺ Reset", key=f"reset_{tweet_id}"):
+                st.session_state.edited_tweets[tweet_id] = tweet['text']
+                st.rerun()
+        
+        # Return the edited text for use in rewrites
+        tweet['edited_text'] = edited_text
         
         media = fetch_tweet_media(tweet['id'])
         if media:
@@ -551,11 +643,41 @@ Keep it under 280 characters. Sound like Tyler - insider perspective, conversati
     
     return rewrites
 
-if st.button("🔍 Scan for Viral Broncos & Nuggets Debates", use_container_width=True):
-    with st.spinner("Scanning Twitter for controversial Broncos & Nuggets content..."):
+# Button section
+col1, col2, col3 = st.columns([2, 2, 1])
+
+with col1:
+    scan_button = st.button("🔍 Scan for Viral Debates", use_container_width=True, type="primary")
+
+with col2:
+    scan_new_button = st.button("🆕 Scan Again (New Tweets Only)", use_container_width=True)
+
+with col3:
+    if st.button("🗑️ Clear History"):
+        st.session_state.shown_tweet_ids = set()
+        st.session_state.edited_tweets = {}
+        st.session_state.generated_rewrites = {}
+        st.success("History cleared!")
+        st.rerun()
+
+# Show count of previously seen tweets
+if len(st.session_state.shown_tweet_ids) > 0:
+    st.caption(f"📊 Already shown {len(st.session_state.shown_tweet_ids)} tweets (will be excluded from 'New Tweets Only' scans)")
+
+if scan_button or scan_new_button:
+    # Determine which tweets to exclude
+    exclude_ids = st.session_state.shown_tweet_ids if scan_new_button else set()
+    
+    scan_type = "new tweets only" if scan_new_button else "all viral debates"
+    
+    with st.spinner(f"Scanning Twitter for {scan_type}..."):
         
         # Get top tweets with diversity enforcement
-        top_broncos, top_nuggets = get_top_debate_tweets()
+        top_broncos, top_nuggets = get_top_debate_tweets(exclude_ids=exclude_ids)
+        
+        # Track newly shown tweets
+        for tweet in top_broncos + top_nuggets:
+            st.session_state.shown_tweet_ids.add(tweet['id'])
         
         if top_broncos or top_nuggets:
             st.success(f"✅ Found {len(top_broncos)} Broncos + {len(top_nuggets)} Nuggets debates with max variety!")
@@ -568,30 +690,39 @@ if st.button("🔍 Scan for Viral Broncos & Nuggets Debates", use_container_widt
                         tweet = top_broncos[i]
                         display_tweet_card(tweet, is_top_pick=True, pick_number=i+1)
                         
-                        with st.spinner("Generating rewrites in your voice..."):
-                            rewrites = generate_rewrites(tweet['text'])
+                        # Use edited text if available, otherwise original
+                        text_to_rewrite = tweet.get('edited_text', tweet['text'])
+                        tweet_key = f"top{i}"
                         
-                        st.markdown("**✍️ Your Rewrites:**")
+                        if st.button(f"✨ Generate Rewrites", key=f"gen_{tweet_key}", use_container_width=True):
+                            with st.spinner("Generating rewrites in your voice..."):
+                                rewrites = generate_rewrites(text_to_rewrite)
+                                st.session_state.generated_rewrites[tweet_key] = rewrites
                         
-                        col1, col2 = st.columns(2)
-                        
-                        with col1:
-                            st.markdown(f"<div class='rewrite-preview'><strong>Default:</strong><br>{rewrites['Default']}</div>", unsafe_allow_html=True)
-                            if st.button("📋 Copy", key=f"copy_default_top{i}"):
-                                st.code(rewrites['Default'], language=None)
+                        # Display rewrites if they exist
+                        if tweet_key in st.session_state.generated_rewrites:
+                            rewrites = st.session_state.generated_rewrites[tweet_key]
+                            st.markdown("**✍️ Your Rewrites:**")
                             
-                            st.markdown(f"<div class='rewrite-preview'><strong>Analytical:</strong><br>{rewrites['Analytical']}</div>", unsafe_allow_html=True)
-                            if st.button("📋 Copy", key=f"copy_analytical_top{i}"):
-                                st.code(rewrites['Analytical'], language=None)
-                        
-                        with col2:
-                            st.markdown(f"<div class='rewrite-preview'><strong>Controversial:</strong><br>{rewrites['Controversial']}</div>", unsafe_allow_html=True)
-                            if st.button("📋 Copy", key=f"copy_controversial_top{i}"):
-                                st.code(rewrites['Controversial'], language=None)
+                            col1, col2 = st.columns(2)
                             
-                            st.markdown(f"<div class='rewrite-preview'><strong>Personal:</strong><br>{rewrites['Personal']}</div>", unsafe_allow_html=True)
-                            if st.button("📋 Copy", key=f"copy_personal_top{i}"):
-                                st.code(rewrites['Personal'], language=None)
+                            with col1:
+                                st.markdown(f"<div class='rewrite-preview'><strong>Default:</strong><br>{rewrites['Default']}</div>", unsafe_allow_html=True)
+                                if st.button("📋 Copy", key=f"copy_default_{tweet_key}"):
+                                    st.code(rewrites['Default'], language=None)
+                                
+                                st.markdown(f"<div class='rewrite-preview'><strong>Analytical:</strong><br>{rewrites['Analytical']}</div>", unsafe_allow_html=True)
+                                if st.button("📋 Copy", key=f"copy_analytical_{tweet_key}"):
+                                    st.code(rewrites['Analytical'], language=None)
+                            
+                            with col2:
+                                st.markdown(f"<div class='rewrite-preview'><strong>Controversial:</strong><br>{rewrites['Controversial']}</div>", unsafe_allow_html=True)
+                                if st.button("📋 Copy", key=f"copy_controversial_{tweet_key}"):
+                                    st.code(rewrites['Controversial'], language=None)
+                                
+                                st.markdown(f"<div class='rewrite-preview'><strong>Personal:</strong><br>{rewrites['Personal']}</div>", unsafe_allow_html=True)
+                                if st.button("📋 Copy", key=f"copy_personal_{tweet_key}"):
+                                    st.code(rewrites['Personal'], language=None)
                         
                         st.markdown("---")
                 
@@ -600,30 +731,39 @@ if st.button("🔍 Scan for Viral Broncos & Nuggets Debates", use_container_widt
                     for idx, tweet in enumerate(top_broncos[3:], start=3):
                         display_tweet_card(tweet, is_top_pick=False)
                         
-                        with st.spinner("Generating rewrites in your voice..."):
-                            rewrites = generate_rewrites(tweet['text'])
+                        # Use edited text if available, otherwise original
+                        text_to_rewrite = tweet.get('edited_text', tweet['text'])
+                        tweet_key = f"b{idx}"
                         
-                        st.markdown("**✍️ Your Rewrites:**")
+                        if st.button(f"✨ Generate Rewrites", key=f"gen_{tweet_key}", use_container_width=True):
+                            with st.spinner("Generating rewrites in your voice..."):
+                                rewrites = generate_rewrites(text_to_rewrite)
+                                st.session_state.generated_rewrites[tweet_key] = rewrites
                         
-                        col1, col2 = st.columns(2)
-                        
-                        with col1:
-                            st.markdown(f"<div class='rewrite-preview'><strong>Default:</strong><br>{rewrites['Default']}</div>", unsafe_allow_html=True)
-                            if st.button("📋 Copy", key=f"copy_default_b{idx}"):
-                                st.code(rewrites['Default'], language=None)
+                        # Display rewrites if they exist
+                        if tweet_key in st.session_state.generated_rewrites:
+                            rewrites = st.session_state.generated_rewrites[tweet_key]
+                            st.markdown("**✍️ Your Rewrites:**")
                             
-                            st.markdown(f"<div class='rewrite-preview'><strong>Analytical:</strong><br>{rewrites['Analytical']}</div>", unsafe_allow_html=True)
-                            if st.button("📋 Copy", key=f"copy_analytical_b{idx}"):
-                                st.code(rewrites['Analytical'], language=None)
-                        
-                        with col2:
-                            st.markdown(f"<div class='rewrite-preview'><strong>Controversial:</strong><br>{rewrites['Controversial']}</div>", unsafe_allow_html=True)
-                            if st.button("📋 Copy", key=f"copy_controversial_b{idx}"):
-                                st.code(rewrites['Controversial'], language=None)
+                            col1, col2 = st.columns(2)
                             
-                            st.markdown(f"<div class='rewrite-preview'><strong>Personal:</strong><br>{rewrites['Personal']}</div>", unsafe_allow_html=True)
-                            if st.button("📋 Copy", key=f"copy_personal_b{idx}"):
-                                st.code(rewrites['Personal'], language=None)
+                            with col1:
+                                st.markdown(f"<div class='rewrite-preview'><strong>Default:</strong><br>{rewrites['Default']}</div>", unsafe_allow_html=True)
+                                if st.button("📋 Copy", key=f"copy_default_{tweet_key}"):
+                                    st.code(rewrites['Default'], language=None)
+                                
+                                st.markdown(f"<div class='rewrite-preview'><strong>Analytical:</strong><br>{rewrites['Analytical']}</div>", unsafe_allow_html=True)
+                                if st.button("📋 Copy", key=f"copy_analytical_{tweet_key}"):
+                                    st.code(rewrites['Analytical'], language=None)
+                            
+                            with col2:
+                                st.markdown(f"<div class='rewrite-preview'><strong>Controversial:</strong><br>{rewrites['Controversial']}</div>", unsafe_allow_html=True)
+                                if st.button("📋 Copy", key=f"copy_controversial_{tweet_key}"):
+                                    st.code(rewrites['Controversial'], language=None)
+                                
+                                st.markdown(f"<div class='rewrite-preview'><strong>Personal:</strong><br>{rewrites['Personal']}</div>", unsafe_allow_html=True)
+                                if st.button("📋 Copy", key=f"copy_personal_{tweet_key}"):
+                                    st.code(rewrites['Personal'], language=None)
                         
                         st.markdown("---")
             
@@ -632,31 +772,43 @@ if st.button("🔍 Scan for Viral Broncos & Nuggets Debates", use_container_widt
                 for idx, tweet in enumerate(top_nuggets):
                     display_tweet_card(tweet, is_top_pick=False)
                     
-                    with st.spinner("Generating rewrites in your voice..."):
-                        rewrites = generate_rewrites(tweet['text'])
+                    # Use edited text if available, otherwise original
+                    text_to_rewrite = tweet.get('edited_text', tweet['text'])
+                    tweet_key = f"n{idx}"
                     
-                    st.markdown("**✍️ Your Rewrites:**")
+                    if st.button(f"✨ Generate Rewrites", key=f"gen_{tweet_key}", use_container_width=True):
+                        with st.spinner("Generating rewrites in your voice..."):
+                            rewrites = generate_rewrites(text_to_rewrite)
+                            st.session_state.generated_rewrites[tweet_key] = rewrites
                     
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        st.markdown(f"<div class='rewrite-preview'><strong>Default:</strong><br>{rewrites['Default']}</div>", unsafe_allow_html=True)
-                        if st.button("📋 Copy", key=f"copy_default_n{idx}"):
-                            st.code(rewrites['Default'], language=None)
+                    # Display rewrites if they exist
+                    if tweet_key in st.session_state.generated_rewrites:
+                        rewrites = st.session_state.generated_rewrites[tweet_key]
+                        st.markdown("**✍️ Your Rewrites:**")
                         
-                        st.markdown(f"<div class='rewrite-preview'><strong>Analytical:</strong><br>{rewrites['Analytical']}</div>", unsafe_allow_html=True)
-                        if st.button("📋 Copy", key=f"copy_analytical_n{idx}"):
-                            st.code(rewrites['Analytical'], language=None)
-                    
-                    with col2:
-                        st.markdown(f"<div class='rewrite-preview'><strong>Controversial:</strong><br>{rewrites['Controversial']}</div>", unsafe_allow_html=True)
-                        if st.button("📋 Copy", key=f"copy_controversial_n{idx}"):
-                            st.code(rewrites['Controversial'], language=None)
+                        col1, col2 = st.columns(2)
                         
-                        st.markdown(f"<div class='rewrite-preview'><strong>Personal:</strong><br>{rewrites['Personal']}</div>", unsafe_allow_html=True)
-                        if st.button("📋 Copy", key=f"copy_personal_n{idx}"):
-                            st.code(rewrites['Personal'], language=None)
+                        with col1:
+                            st.markdown(f"<div class='rewrite-preview'><strong>Default:</strong><br>{rewrites['Default']}</div>", unsafe_allow_html=True)
+                            if st.button("📋 Copy", key=f"copy_default_{tweet_key}"):
+                                st.code(rewrites['Default'], language=None)
+                            
+                            st.markdown(f"<div class='rewrite-preview'><strong>Analytical:</strong><br>{rewrites['Analytical']}</div>", unsafe_allow_html=True)
+                            if st.button("📋 Copy", key=f"copy_analytical_{tweet_key}"):
+                                st.code(rewrites['Analytical'], language=None)
+                        
+                        with col2:
+                            st.markdown(f"<div class='rewrite-preview'><strong>Controversial:</strong><br>{rewrites['Controversial']}</div>", unsafe_allow_html=True)
+                            if st.button("📋 Copy", key=f"copy_controversial_{tweet_key}"):
+                                st.code(rewrites['Controversial'], language=None)
+                            
+                            st.markdown(f"<div class='rewrite-preview'><strong>Personal:</strong><br>{rewrites['Personal']}</div>", unsafe_allow_html=True)
+                            if st.button("📋 Copy", key=f"copy_personal_{tweet_key}"):
+                                st.code(rewrites['Personal'], language=None)
                     
                     st.markdown("---")
         else:
-            st.warning("⚠️ No viral debates found in the last 36 hours. Try again later!")
+            if scan_new_button and len(exclude_ids) > 0:
+                st.warning(f"⚠️ No NEW viral debates found (already showed {len(exclude_ids)} tweets). Try regular scan or clear history!")
+            else:
+                st.warning("⚠️ No viral debates found in the last 36 hours. Try again later!")
