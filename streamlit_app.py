@@ -42,6 +42,15 @@ st.markdown("""
         margin: 12px 0;
     }
     .metric-high { color: #f91880; font-weight: bold; }
+    .debate-badge {
+        background-color: #ff4500;
+        color: white;
+        padding: 4px 10px;
+        border-radius: 12px;
+        font-size: 11px;
+        font-weight: bold;
+        margin-left: 8px;
+    }
     .rewrite-preview {
         background-color: #1c1f23;
         border-left: 3px solid #1d9bf0;
@@ -70,6 +79,7 @@ st.markdown("""
     }
     .bo-nix { background-color: #ff4500; color: white; }
     .sean-payton { background-color: #ff8c00; color: white; }
+    .nuggets { background-color: #ffd700; color: black; }
     .broncos { background-color: #fb4f14; color: white; }
 </style>
 """, unsafe_allow_html=True)
@@ -84,33 +94,57 @@ st.title("🏈 Broncos Tweet Hunter")
 st.caption(f"Find the most controversial Denver Broncos & Nuggets debates from the last {HOURS_BACK} hours")
 
 def determine_priority(tweet_text):
-    """Determine ranking priority based on content - SMALL tiebreaker only"""
+    """Determine ranking priority based on content"""
     text_lower = tweet_text.lower()
-    if "bo nix" in text_lower or "bo mix" in text_lower:
-        return {"rank": 1, "label": "🔥 BO NIX", "color": "bo-nix", "priority": 100}
-    elif "sean payton" in text_lower or "payton" in text_lower:
-        return {"rank": 2, "label": "⚡ SEAN PAYTON", "color": "sean-payton", "priority": 50}
-    else:
-        return {"rank": 3, "label": "🏈 BRONCOS", "color": "broncos", "priority": 10}
+    if any(word in text_lower for word in ["bo nix", "nix", "bo mix"]):
+        return {"priority": 100, "label": "🔥 BO NIX", "color": "bo-nix"}
+    elif any(word in text_lower for word in ["sean payton", "payton"]):
+        return {"priority": 75, "label": "⚡ SEAN PAYTON", "color": "sean-payton"}
+    elif any(word in text_lower for word in ["jokic", "nuggets"]):
+        return {"priority": 50, "label": "🏀 NUGGETS", "color": "nuggets"}
+    return {"priority": 10, "label": "🏈 BRONCOS", "color": "broncos"}
+
+def calculate_debate_score(metrics, tweet_text):
+    """HEAVILY prioritizes replies (debate) + retweets (virality)"""
+    text_lower = tweet_text.lower()
+    
+    # Base score — replies dominate
+    score = (
+        metrics['reply_count'] * 75000 +      # Massive weight on replies (debate)
+        metrics['retweet_count'] * 1200 +     # Strong weight on retweets (spread)
+        metrics['like_count'] * 8 +           # Likes almost ignored
+        determine_priority(tweet_text)['priority']
+    )
+    
+    # Bonus for controversial language (extra push for debate tweets)
+    controversy_keywords = [
+        "fire", "trade", "overrated", "bust", "sucks", "trash", "worst", 
+        "choke", "flop", "out", "hot take", "debate", "controversial", 
+        "payton out", "nix sucks", "jokic flop", "no fly zone"
+    ]
+    if any(kw in text_lower for kw in controversy_keywords):
+        score += 250000  # Huge boost — puts it near top
+    
+    return score
 
 def is_spam_tweet(tweet, metrics):
-    """Filter out spam tweets - RELAXED per Grok's recommendation"""
+    """Filter out spam tweets - RELAXED for debate tweets"""
     total_engagement = (
         metrics['reply_count'] + 
         metrics['like_count'] + 
         metrics['retweet_count']
     )
     
-    # Only block low-engagement @-replies (not all @-starts)
-    if tweet.text.startswith('@') and total_engagement < 20:
+    # Allow high-reply @-replies (debate threads)
+    if tweet.text.startswith('@') and total_engagement < 15:
         return True
     
-    # Block excessive mass mentions
-    if tweet.text.count('@') >= 10:
+    # Block excessive mass mentions (raise threshold)
+    if tweet.text.count('@') >= 15:
         return True
     
-    # Raise minimum threshold (was 5, now 10)
-    if total_engagement < 10:
+    # Raise minimum threshold
+    if total_engagement < 8:
         return True
     
     return False
@@ -127,23 +161,31 @@ def is_original_tweet(tweet):
     
     return True
 
-def search_viral_tweets(keywords, hours=None):
-    """Search for viral tweets - WITH RELEVANCY SORTING!"""
+def search_viral_tweets(keywords, hours=None, debate_mode=False):
+    """Search for viral tweets - WITH RELEVANCY SORTING + OPTIONAL DEBATE MODE"""
     if hours is None:
         hours = HOURS_BACK
     
-    query = " OR ".join(keywords)
-    query += " -is:retweet lang:en"
+    base_keywords = " OR ".join(keywords)
+    query = base_keywords + " -is:retweet lang:en"
+    
+    # DEBATE MODE: Add controversial terms to query
+    if debate_mode:
+        debate_terms = [
+            "fire Payton", "Payton out", "Bo Nix bust", "Bo Nix overrated", 
+            "Surtain overrated", "trade", "worst", "sucks", "trash", "debate", 
+            "hot take", "no fly zone sucks"
+        ]
+        query = f"({query}) OR ({' OR '.join(debate_terms)})"
     
     start_time = datetime.utcnow() - timedelta(hours=hours)
     
     try:
-        # PRIMARY FIX: Add sort_order='relevancy'
         tweets = client_twitter.search_recent_tweets(
             query=query,
             max_results=MAX_TWEETS,
             start_time=start_time,
-            sort_order='relevancy',  # ← CRITICAL FIX!
+            sort_order='relevancy',  # CRITICAL: Get best tweets from Twitter
             tweet_fields=['public_metrics', 'created_at', 'referenced_tweets'],
             expansions=['author_id'],
             user_fields=['username', 'name']
@@ -157,12 +199,6 @@ def search_viral_tweets(keywords, hours=None):
         
         for tweet in tweets.data:
             metrics = tweet.public_metrics
-            user = users.get(tweet.author_id)
-            
-            # DEBUG LOGGING (optional - can remove in production)
-            print(f"@{user.username if user else 'Unknown'} | {tweet.created_at} | "
-                  f"Replies:{metrics['reply_count']} RTs:{metrics['retweet_count']} "
-                  f"Likes:{metrics['like_count']} | {tweet.text[:80]}...")
             
             # SPAM FILTER
             if is_spam_tweet(tweet, metrics):
@@ -172,14 +208,11 @@ def search_viral_tweets(keywords, hours=None):
             if not is_original_tweet(tweet):
                 continue
             
+            # CALCULATE DEBATE SCORE (replies-heavy)
+            score = calculate_debate_score(metrics, tweet.text)
             priority_info = determine_priority(tweet.text)
             
-            engagement_score = (
-                (metrics['reply_count'] * 100000) + 
-                (metrics['retweet_count'] * 100) + 
-                metrics['like_count'] + 
-                priority_info['priority']
-            )
+            user = users.get(tweet.author_id)
             
             scored_tweets.append({
                 'id': tweet.id,
@@ -190,69 +223,14 @@ def search_viral_tweets(keywords, hours=None):
                 'likes': metrics['like_count'],
                 'retweets': metrics['retweet_count'],
                 'replies': metrics['reply_count'],
-                'engagement_score': engagement_score,
+                'debate_score': score,
                 'priority': priority_info
             })
         
-        scored_tweets.sort(key=lambda x: x['engagement_score'], reverse=True)
-        
-        # SMART FALLBACK: If too few results, add recency search
-        if len(scored_tweets) < 8:
-            print("⚠️ Relevancy returned few results, adding recency fallback...")
-            try:
-                tweets_recency = client_twitter.search_recent_tweets(
-                    query=query,
-                    max_results=100,
-                    start_time=start_time,
-                    # No sort_order = recency
-                    tweet_fields=['public_metrics', 'created_at', 'referenced_tweets'],
-                    expansions=['author_id'],
-                    user_fields=['username', 'name']
-                )
-                
-                if tweets_recency.data:
-                    users_recency = {user.id: user for user in tweets_recency.includes['users']}
-                    
-                    for tweet in tweets_recency.data:
-                        # Skip if already in results
-                        if any(t['id'] == tweet.id for t in scored_tweets):
-                            continue
-                        
-                        metrics = tweet.public_metrics
-                        
-                        if is_spam_tweet(tweet, metrics):
-                            continue
-                        
-                        if not is_original_tweet(tweet):
-                            continue
-                        
-                        priority_info = determine_priority(tweet.text)
-                        engagement_score = (
-                            (metrics['reply_count'] * 100000) + 
-                            (metrics['retweet_count'] * 100) + 
-                            metrics['like_count'] + 
-                            priority_info['priority']
-                        )
-                        
-                        user = users_recency.get(tweet.author_id)
-                        scored_tweets.append({
-                            'id': tweet.id,
-                            'text': tweet.text,
-                            'author': user.username if user else 'Unknown',
-                            'author_name': user.name if user else 'Unknown',
-                            'created_at': tweet.created_at,
-                            'likes': metrics['like_count'],
-                            'retweets': metrics['retweet_count'],
-                            'replies': metrics['reply_count'],
-                            'engagement_score': engagement_score,
-                            'priority': priority_info
-                        })
-                    
-                    scored_tweets.sort(key=lambda x: x['engagement_score'], reverse=True)
-            except Exception as e:
-                print(f"Fallback search error: {e}")
-        
+        # Sort by debate_score descending
+        scored_tweets.sort(key=lambda x: x['debate_score'], reverse=True)
         return scored_tweets
+        
     except Exception as e:
         st.error(f"Error: {str(e)}")
         return []
@@ -276,17 +254,29 @@ def display_tweet_card(tweet, is_top_pick=False, pick_number=None):
     """Display a tweet card using Streamlit container"""
     tweet_url = f"https://twitter.com/{tweet['author']}/status/{tweet['id']}"
     
+    # Check if it's a hot debate (high replies)
+    is_debate = tweet['replies'] >= 10
+    
     with st.container():
         if is_top_pick:
             st.markdown(f'<span class="top-pick-badge">⭐ TOP PICK #{pick_number}</span>', unsafe_allow_html=True)
         
-        st.markdown(f'''
+        header_html = f'''
             <div style="margin-bottom: 12px;">
                 <span class="priority-badge {tweet['priority']['color']}">{tweet['priority']['label']}</span>
+        '''
+        
+        if is_debate:
+            header_html += f'<span class="debate-badge">🔥 {tweet["replies"]} replies</span>'
+        
+        header_html += f'''
+                <br>
                 <strong style="color: #e7e9ea;">{tweet['author_name']}</strong> 
                 <span style="color: #71767b;">@{tweet['author']}</span>
             </div>
-        ''', unsafe_allow_html=True)
+        '''
+        
+        st.markdown(header_html, unsafe_allow_html=True)
         
         st.markdown(f'<div style="font-size: 15px; line-height: 20px; color: #e7e9ea; margin-bottom: 12px;">{tweet["text"]}</div>', unsafe_allow_html=True)
         
@@ -305,8 +295,8 @@ def display_tweet_card(tweet, is_top_pick=False, pick_number=None):
         st.markdown(f'''
             <div style="display: flex; gap: 20px; color: #71767b; font-size: 13px; margin: 12px 0;">
                 <span class="{metric_style}">💬 {tweet['replies']} replies</span>
+                <span class="{metric_style}">🔄 {tweet['retweets']} RTs</span>
                 <span class="{metric_style}">❤️ {tweet['likes']}</span>
-                <span class="{metric_style}">🔄 {tweet['retweets']}</span>
             </div>
         ''', unsafe_allow_html=True)
         
@@ -347,25 +337,58 @@ Keep it under 280 characters. Sound like Tyler - insider perspective, conversati
 
 if st.button("🔍 Scan for Viral Broncos & Nuggets Debates", use_container_width=True):
     with st.spinner("Scanning Twitter for controversial Broncos & Nuggets content..."):
-        # ENHANCED KEYWORDS per Grok's recommendations
+        
+        # BRONCOS: Two searches - normal + debate mode
         broncos_keywords = [
             "#Broncos",
             "#BroncosCountry",
             "Broncos",
-            "Denver Broncos",  # Phrase matching
+            "Denver Broncos",
             "Bo Nix",
             "Surtain",
             "Sean Payton"
         ]
-        broncos_tweets = search_viral_tweets(broncos_keywords)
         
+        # Search 1: Normal relevancy
+        broncos_normal = search_viral_tweets(broncos_keywords, debate_mode=False)
+        
+        # Search 2: Debate mode (controversial terms)
+        broncos_debate = search_viral_tweets(broncos_keywords, debate_mode=True)
+        
+        # Combine and deduplicate
+        seen_ids = set()
+        broncos_tweets = []
+        for tweet in broncos_normal + broncos_debate:
+            if tweet['id'] not in seen_ids:
+                seen_ids.add(tweet['id'])
+                broncos_tweets.append(tweet)
+        
+        # Re-sort combined list by debate score
+        broncos_tweets.sort(key=lambda x: x['debate_score'], reverse=True)
+        
+        # NUGGETS: Two searches - normal + debate mode
         nuggets_keywords = [
             "#Nuggets",
             "Nuggets",
-            "Denver Nuggets",  # Phrase matching
+            "Denver Nuggets",
             "Jokic"
         ]
-        nuggets_tweets = search_viral_tweets(nuggets_keywords)
+        
+        # Debate terms for Nuggets
+        nuggets_normal = search_viral_tweets(nuggets_keywords, debate_mode=False)
+        
+        # For Nuggets, add "Jokic flop", "Nuggets choke" in debate mode
+        nuggets_debate = search_viral_tweets(nuggets_keywords, debate_mode=True)
+        
+        # Combine and deduplicate
+        seen_ids_nuggets = set()
+        nuggets_tweets = []
+        for tweet in nuggets_normal + nuggets_debate:
+            if tweet['id'] not in seen_ids_nuggets:
+                seen_ids_nuggets.add(tweet['id'])
+                nuggets_tweets.append(tweet)
+        
+        nuggets_tweets.sort(key=lambda x: x['debate_score'], reverse=True)
         
         top_broncos = broncos_tweets[:10]
         top_nuggets = nuggets_tweets[:5]
