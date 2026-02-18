@@ -19,6 +19,22 @@ MAX_TWEETS = 100
 HOURS_BACK = 36
 SCAN_HISTORY_FILE = Path("scan_history.json")
 TYLER_USERNAME = "tyler_polumbus"  # For tweet performance tracker
+
+# High-signal accounts — beat writers, official, fan accounts with real engagement
+INSIDER_ACCOUNTS = [
+    # Official team
+    "Broncos", "nuggets",
+    # Broncos beat writers / media
+    "MaseDenver", "NickKosmider", "ZacStevensDNVR", "AricDiLalla",
+    "RyanKoenigsberg", "BenjaminAllbright", "CecilLammey", "TroyRenck",
+    "MikeKlis", "DMac_Denver",
+    # Broncos fan / analysis
+    "ThatsGoodSports", "MileHighReport", "BSNBroncos", "InTheNixOfTime",
+    # Nuggets beat writers / media
+    "msaborern", "Harrison_Wind", "AdamMaresSBN", "BSNNuggets",
+    # Denver sports general
+    "AltitudeSR",
+]
 # ========================================
 
 st.set_page_config(page_title="Tweet Hunter", layout="wide", initial_sidebar_state="collapsed")
@@ -403,8 +419,60 @@ def search_viral_tweets(keywords, hours=36, debate_mode=False, sort_order='relev
         print(f"Search error: {str(e)}")
         return None
 
+def search_insider_tweets(accounts, hours=24):
+    """Search for tweets FROM high-signal insider accounts"""
+    # Twitter query length limit — use first 10 accounts
+    sample = random.sample(accounts, min(10, len(accounts)))
+    from_clause = " OR ".join([f"from:{acct}" for acct in sample])
+    query = f"({from_clause}) -is:retweet lang:en"
+    
+    start_time = datetime.utcnow() - timedelta(hours=hours)
+    
+    try:
+        tweets = client_twitter.search_recent_tweets(
+            query=query,
+            max_results=50,
+            start_time=start_time,
+            sort_order='relevancy',
+            tweet_fields=['public_metrics', 'created_at', 'referenced_tweets', 'attachments'],
+            expansions=['author_id', 'attachments.media_keys'],
+            user_fields=['username', 'name'],
+            media_fields=['url', 'preview_image_url', 'type']
+        )
+        return tweets
+    except Exception as e:
+        print(f"Insider search error: {str(e)}")
+        return None
+
+def get_subject_penalty_from_history():
+    """Penalize subjects that dominated previous scans (cross-scan balancing)"""
+    try:
+        history = []
+        if SCAN_HISTORY_FILE.exists():
+            all_history = json.loads(SCAN_HISTORY_FILE.read_text())
+            # Look at last 3 scans only
+            history = all_history[-3:] if len(all_history) >= 3 else all_history
+        
+        subject_appearances = defaultdict(int)
+        for entry in history:
+            topics = entry.get("topics", {})
+            for subject in topics:
+                subject_appearances[subject] += 1
+        
+        # Subjects that appeared in all recent scans get penalized
+        penalty = {}
+        for subject, count in subject_appearances.items():
+            if count >= 3:
+                penalty[subject] = 3  # Heavy penalty — appeared in all 3 recent scans
+            elif count >= 2:
+                penalty[subject] = 1  # Light penalty
+        
+        return penalty
+    except Exception:
+        return {}
+
 def get_top_debate_tweets(exclude_ids=None):
-    """Main processing: 4 core relevancy searches + 2 fresh recency searches + scoring + diversity"""
+    """Main processing: 4 core + 2 fresh + 1 insider + scoring + diversity"""
     
     if exclude_ids is None:
         exclude_ids = set()
@@ -413,24 +481,30 @@ def get_top_debate_tweets(exclude_ids=None):
     fresh_hours = random.randint(12, 18)
     fresh_start = datetime.utcnow() - timedelta(hours=fresh_hours)
     
-    # Run 6 searches IN PARALLEL
+    # Run 7 searches IN PARALLEL
     # Core 4: UNCHANGED from baseline (relevancy, full 36h window)
-    # Fresh 2: ADDED on top (recency, recent 12-18h slice)
-    with ThreadPoolExecutor(max_workers=6) as executor:
+    # Fresh 2: ADDED (recency, recent 12-18h slice)
+    # Insider 1: ADDED (beat writers + team accounts)
+    with ThreadPoolExecutor(max_workers=7) as executor:
         futures = {
             # --- CORE 4: identical to baseline ---
             'broncos_normal': executor.submit(search_viral_tweets, BRONCOS_KEYWORDS, HOURS_BACK, False),
             'broncos_debate': executor.submit(search_viral_tweets, BRONCOS_KEYWORDS, HOURS_BACK, True),
             'nuggets_normal': executor.submit(search_viral_tweets, NUGGETS_KEYWORDS, HOURS_BACK, False),
             'nuggets_debate': executor.submit(search_viral_tweets, NUGGETS_KEYWORDS, HOURS_BACK, True),
-            # --- FRESH 2: additive recency injection ---
+            # --- FRESH 2: recency injection ---
             'broncos_fresh': executor.submit(search_viral_tweets, BRONCOS_KEYWORDS, fresh_hours, False, 'recency', fresh_start),
             'nuggets_fresh': executor.submit(search_viral_tweets, NUGGETS_KEYWORDS, fresh_hours, False, 'recency', fresh_start),
+            # --- INSIDER 1: beat writers + team accounts ---
+            'insiders': executor.submit(search_insider_tweets, INSIDER_ACCOUNTS, 24),
         }
         results = {name: f.result() for name, f in futures.items()}
     
-    # Track which results came from recency searches
-    recency_sources = {'broncos_fresh', 'nuggets_fresh'}
+    # Track which results get relaxed filters (fresh + insider tweets)
+    recency_sources = {'broncos_fresh', 'nuggets_fresh', 'insiders'}
+    
+    # Get subject penalty from scan history (cross-scan balancing)
+    subject_penalty = get_subject_penalty_from_history()
     
     all_tweets = []
     seen_ids = set()
@@ -442,13 +516,15 @@ def get_top_debate_tweets(exclude_ids=None):
         'total_raw': 0,
         'total_raw_core': 0,
         'total_raw_fresh': 0,
+        'total_raw_insider': 0,
         'filtered_spam': 0,
         'filtered_not_original': 0,
         'filtered_rugby': 0,
         'filtered_duplicate': 0,
         'kept': 0,
         'kept_fresh': 0,
-        'fresh_window': f"{fresh_hours}h"
+        'fresh_window': f"{fresh_hours}h",
+        'subjects_penalized': list(subject_penalty.keys()) if subject_penalty else []
     }
     
     # Process all 6 search results
@@ -459,7 +535,9 @@ def get_top_debate_tweets(exclude_ids=None):
         is_recency = source_name in recency_sources
         
         stats['total_raw'] += len(tweets_obj.data)
-        if is_recency:
+        if source_name == 'insiders':
+            stats['total_raw_insider'] += len(tweets_obj.data)
+        elif is_recency:
             stats['total_raw_fresh'] += len(tweets_obj.data)
         else:
             stats['total_raw_core'] += len(tweets_obj.data)
@@ -530,6 +608,15 @@ def get_top_debate_tweets(exclude_ids=None):
             
             if is_fresh:
                 stats['kept_fresh'] += 1
+            
+            # Velocity boost — fresh tweets with rising replies are the #1 target
+            if age_hours < 8 and metrics['reply_count'] > 3:
+                score += metrics['reply_count'] * 20000  # Rising debate signal
+            
+            # Cross-scan subject penalty — demote subjects that dominated recent scans
+            for subj in subjects:
+                if subj in subject_penalty:
+                    score -= subject_penalty[subj] * 50000  # Gentle demotion
             
             # Attach media
             tweet_media = []
@@ -634,6 +721,79 @@ def get_top_debate_tweets(exclude_ids=None):
                 final_nuggets.append(tweet)
                 for subj in tweet['subjects']:
                     subject_count_nuggets[subj] += 1
+    
+    # VOLUME FALLBACK: If still short after diversity relaxation,
+    # relax even further (max 5 per subject) from backup pool
+    if len(final_broncos) < 6 and broncos_backup:
+        for tweet in broncos_backup:
+            if len(final_broncos) >= 10:
+                break
+            if tweet not in final_broncos:
+                can_add = True
+                for subj in tweet['subjects']:
+                    if subject_count_broncos[subj] >= 5:
+                        can_add = False
+                        break
+                if can_add:
+                    final_broncos.append(tweet)
+                    for subj in tweet['subjects']:
+                        subject_count_broncos[subj] += 1
+    
+    if len(final_nuggets) < 3 and nuggets_backup:
+        for tweet in nuggets_backup:
+            if len(final_nuggets) >= 5:
+                break
+            if tweet not in final_nuggets:
+                can_add = True
+                for subj in tweet['subjects']:
+                    if subject_count_nuggets[subj] >= 5:
+                        can_add = False
+                        break
+                if can_add:
+                    final_nuggets.append(tweet)
+                    for subj in tweet['subjects']:
+                        subject_count_nuggets[subj] += 1
+    
+    # LAST RESORT: If still under 6 Broncos, do one extra relevancy search
+    if len(final_broncos) < 6:
+        try:
+            extra = search_viral_tweets(BRONCOS_KEYWORDS, HOURS_BACK, True)
+            if extra and extra.data:
+                extra_users = {}
+                if hasattr(extra, 'includes') and extra.includes and 'users' in extra.includes:
+                    for u in extra.includes['users']:
+                        extra_users[u.id] = u
+                for tweet in extra.data:
+                    if len(final_broncos) >= 10:
+                        break
+                    if tweet.id in seen_ids or tweet.id in exclude_ids:
+                        continue
+                    m = tweet.public_metrics
+                    if is_spam_tweet(tweet, m):
+                        continue
+                    if not is_original_tweet(tweet):
+                        continue
+                    if is_wrong_broncos_team(tweet):
+                        continue
+                    eu = extra_users.get(tweet.author_id)
+                    final_broncos.append({
+                        'id': tweet.id,
+                        'text': tweet.text,
+                        'author': eu.username if eu else 'Unknown',
+                        'author_name': eu.name if eu else 'Unknown',
+                        'created_at': tweet.created_at,
+                        'likes': m['like_count'],
+                        'retweets': m['retweet_count'],
+                        'replies': m['reply_count'],
+                        'debate_score': calculate_debate_score(m, tweet.text),
+                        'priority': determine_priority(tweet.text),
+                        'subjects': extract_subjects(tweet.text),
+                        'media': [],
+                        'is_fresh': False,
+                        'age_hours': 999
+                    })
+        except Exception as e:
+            print(f"Volume fallback error: {e}")
     
     return final_broncos, final_nuggets, stats
 
@@ -1314,8 +1474,10 @@ if st.session_state.current_broncos_tweets or st.session_state.current_nuggets_t
         if 'filter_stats' in st.session_state:
             stats = st.session_state.filter_stats
             with st.expander("📊 Scan Info — Search Breakdown + Filters"):
-                st.write(f"**Raw tweets from API:** {stats['total_raw']} (core: {stats.get('total_raw_core', '?')} + fresh: {stats.get('total_raw_fresh', '?')})")
+                st.write(f"**Raw tweets from API:** {stats['total_raw']} (core: {stats.get('total_raw_core', '?')} | fresh: {stats.get('total_raw_fresh', '?')} | insider: {stats.get('total_raw_insider', '?')})")
                 st.write(f"**Fresh recency window:** last {stats.get('fresh_window', '?')}")
+                if stats.get('subjects_penalized'):
+                    st.write(f"**Subjects penalized (overexposed):** {', '.join(stats['subjects_penalized'])}")
                 st.write(f"**Filtered out:**")
                 st.write(f"- Spam: {stats['filtered_spam']}")
                 st.write(f"- Not original: {stats['filtered_not_original']}")
