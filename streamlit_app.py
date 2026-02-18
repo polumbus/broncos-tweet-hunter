@@ -268,7 +268,7 @@ def is_spam_tweet(tweet, metrics):
     if tweet.text.count('@') >= 15:
         return True
     
-    # Minimum engagement threshold
+    # Minimum engagement threshold - BACK TO ORIGINAL
     if total < 8:
         return True
     
@@ -354,21 +354,11 @@ def get_top_debate_tweets(exclude_ids=None):
     if exclude_ids is None:
         exclude_ids = set()
     
-    # Run 4 searches IN PARALLEL! (Was: sequential, now: concurrent)
-    from concurrent.futures import ThreadPoolExecutor
-    
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        # Submit all 4 searches at once
-        future_broncos_normal = executor.submit(search_viral_tweets, BRONCOS_KEYWORDS, False)
-        future_broncos_debate = executor.submit(search_viral_tweets, BRONCOS_KEYWORDS, True)
-        future_nuggets_normal = executor.submit(search_viral_tweets, NUGGETS_KEYWORDS, False)
-        future_nuggets_debate = executor.submit(search_viral_tweets, NUGGETS_KEYWORDS, True)
-        
-        # Get results (will wait for all to complete)
-        broncos_normal = future_broncos_normal.result()
-        broncos_debate = future_broncos_debate.result()
-        nuggets_normal = future_nuggets_normal.result()
-        nuggets_debate = future_nuggets_debate.result()
+    # Run 4 searches SEQUENTIALLY (back to working version)
+    broncos_normal = search_viral_tweets(BRONCOS_KEYWORDS, debate_mode=False)
+    broncos_debate = search_viral_tweets(BRONCOS_KEYWORDS, debate_mode=True)
+    nuggets_normal = search_viral_tweets(NUGGETS_KEYWORDS, debate_mode=False)
+    nuggets_debate = search_viral_tweets(NUGGETS_KEYWORDS, debate_mode=True)
     
     all_tweets = []
     seen_ids = set()
@@ -669,26 +659,22 @@ Return ONLY valid JSON:
         }
 
 # Button section
-col1, col2, col3, col4 = st.columns([2, 2, 1.5, 1])
+col1, col2, col3 = st.columns([3, 3, 1.5])
 
 with col1:
     scan_button = st.button("🔍 Scan for Viral Debates", use_container_width=True, type="primary")
 
 with col2:
-    scan_new_button = st.button("🆕 Scan Again (New Tweets Only)", use_container_width=True)
+    scan_new_button = st.button("🆕 Scan Again (Exclude Previously Shown)", use_container_width=True)
 
 with col3:
-    if st.button("🔄 Reset Duplicates", use_container_width=True):
-        st.session_state.shown_tweet_ids = set()
-        st.success("✅ Duplicate tracking cleared! Next scan will be fresh.")
-        st.rerun()
-
-with col4:
     if st.button("🗑️ Clear All", use_container_width=True):
         st.session_state.shown_tweet_ids = set()
         st.session_state.current_broncos_tweets = []
         st.session_state.current_nuggets_tweets = []
-        st.success("History cleared!")
+        if 'filter_stats' in st.session_state:
+            del st.session_state.filter_stats
+        st.success("All cleared!")
         st.rerun()
 
 # Show count of previously seen tweets
