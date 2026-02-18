@@ -20,7 +20,7 @@ SCAN_HISTORY_FILE = Path("scan_history.json")
 TYLER_USERNAME = "tyler_polumbus"  # For tweet performance tracker
 # ========================================
 
-st.set_page_config(page_title="Broncos Tweet Hunter", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="Tweet Hunter", layout="wide", initial_sidebar_state="collapsed")
 
 st.markdown("""
 <style>
@@ -117,7 +117,7 @@ os.environ["ANTHROPIC_API_KEY"] = st.secrets["ANTHROPIC_API_KEY"]
 client = Anthropic()
 client_twitter = tweepy.Client(bearer_token=os.environ["TWITTER_BEARER_TOKEN"], wait_on_rate_limit=True)
 
-st.title("🏈 Broncos Tweet Hunter")
+st.title("🏈 Tweet Hunter")
 st.caption(f"Find the most controversial Denver Broncos & Nuggets debates from the last {HOURS_BACK} hours")
 
 # Initialize session state for tracking shown tweets
@@ -324,6 +324,51 @@ def is_original_tweet(tweet):
     
     return True
 
+def is_wrong_nuggets(tweet):
+    """Filter out non-Denver Nuggets tweets (chicken nuggets, trading nuggets, etc.)"""
+    text_lower = tweet.text.lower()
+    
+    # Only check tweets that mention nuggets-related keywords
+    if not any(kw in text_lower for kw in ["nuggets", "#nuggets"]):
+        return False  # Not a nuggets tweet, let other filters handle it
+    
+    # If it has clear NBA/Denver context, it's fine
+    nba_context = [
+        "denver", "nba", "jokic", "joker", "murray", "aaron gordon",
+        "michael porter", "mpj", "malone", "coach", "playoff", "playoffs",
+        "championship", "western conference", "ball arena", "altitude",
+        "basketball", "game", "season", "roster", "draft", "trade",
+        "free agent", "mvp", "all-star", "starting lineup", "bench",
+        "points", "assists", "rebounds", "triple double", "load management"
+    ]
+    has_nba_context = any(kw in text_lower for kw in nba_context)
+    
+    if has_nba_context:
+        return False  # Legit Nuggets tweet
+    
+    # Block food, trading, general non-basketball "nuggets"
+    spam_context = [
+        "chicken", "eating", "food", "recipe", "cook", "fry", "fried",
+        "mcdonalds", "burger", "sauce", "meal", "nugget meal",
+        "trading", "traders", "forex", "crypto", "stock", "candle",
+        "chart", "profit", "motivation", "daily motivation",
+        "ford", "ev ", "electric vehicle", "pickup", "truck", "platform",
+        "gold nugget", "nuggets of wisdom", "information nuggets",
+        "dog", "cat", "pet", "puppy", "pidgey", "bird"
+    ]
+    has_spam_context = any(kw in text_lower for kw in spam_context)
+    
+    if has_spam_context:
+        return True  # Definitely not Denver Nuggets
+    
+    # If tweet ONLY says "nuggets" with no NBA context, likely not Denver
+    # But if it has #Nuggets (hashtag), give benefit of the doubt
+    if "#nuggets" in text_lower:
+        return False
+    
+    # Generic "nuggets" with no context either way — block it
+    return True
+
 def search_viral_tweets(keywords, hours=36, debate_mode=False):
     """Search for viral tweets - WITH RELEVANCY SORTING + OPTIONAL DEBATE MODE"""
     base_query = " OR ".join(keywords)
@@ -440,6 +485,11 @@ def get_top_debate_tweets(exclude_ids=None):
             # Filter out wrong Broncos team (rugby/Brisbane)
             if is_wrong_broncos_team(tweet):
                 stats['filtered_rugby'] += 1
+                continue
+            
+            # Filter out non-Denver Nuggets (chicken nuggets, trading, etc.)
+            if is_wrong_nuggets(tweet):
+                stats['filtered_spam'] += 1
                 continue
             
             stats['kept'] += 1
@@ -949,7 +999,7 @@ def find_reply_targets(min_followers=25000):
     # Sort by opportunity score
     all_targets.sort(key=lambda x: x['opportunity_score'], reverse=True)
     
-    return all_targets[:10]  # Top 10 targets
+    return all_targets[:15]  # Top 15 targets
 
 # ========================================
 # SCAN HISTORY PERSISTENCE
