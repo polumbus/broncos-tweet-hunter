@@ -19,70 +19,6 @@ MAX_TWEETS = 100
 HOURS_BACK = 36
 SCAN_HISTORY_FILE = Path("scan_history.json")
 TYLER_USERNAME = "tyler_polumbus"  # For tweet performance tracker
-
-# ========================================
-# SEARCH STRATEGY — QUERY VARIANTS + ROTATION
-# ========================================
-
-# Core keywords (used for tweet classification, not just search)
-BRONCOS_KEYWORDS = [
-    "Denver Broncos", "#Broncos", "#BroncosCountry", "Broncos NFL",
-    "Bo Nix", "Surtain", "Sean Payton"
-]
-
-NUGGETS_KEYWORDS = [
-    "#Nuggets", "Nuggets", "Denver Nuggets", "Jokic"
-]
-
-# Query variants — rotated each scan for diversity
-BRONCOS_QUERY_VARIANTS = [
-    # Variant 0 - Core broad
-    ["Denver Broncos", "#Broncos", "Bo Nix", "Sean Payton"],
-    # Variant 1 - Players deep
-    ["Bo Nix", "Surtain", "Courtland Sutton", "Javonte Williams", "Troy Franklin"],
-    # Variant 2 - Drama / hot takes
-    ["Broncos trade", "fire Payton", "Bo Nix bust", "Broncos draft", "Broncos overrated"],
-    # Variant 3 - Roster / scheme
-    ["Broncos offense", "Broncos defense", "#BroncosCountry", "Broncos roster"],
-    # Variant 4 - Offseason / future
-    ["Broncos free agent", "Broncos mock draft", "Broncos rumors", "Broncos signing"],
-]
-
-NUGGETS_QUERY_VARIANTS = [
-    # Variant 0 - Core broad
-    ["Denver Nuggets", "#Nuggets", "Jokic", "Nuggets NBA"],
-    # Variant 1 - Players deep
-    ["Jokic", "Jamal Murray", "Aaron Gordon", "Michael Porter Jr"],
-    # Variant 2 - Drama / takes
-    ["Nuggets trade", "Murray inconsistent", "Jokic MVP", "Nuggets championship"],
-    # Variant 3 - Game / performance
-    ["Nuggets game", "Nuggets win", "Nuggets loss", "Jokic triple double"],
-]
-
-# Beat writers, team accounts, and major fan accounts to monitor
-DISCOVERY_ACCOUNTS = [
-    # Official
-    "Broncos", "nuggets",
-    # Broncos beat writers / media
-    "MaseDenver", "NickKosmider", "ZacStevensDNVR", "AricDiLalla",
-    "RyanKoenigsberg", "BenjaminAllbright", "CecilLammey", "TroyRenck",
-    "DMac_Denver", "MikeKlis",
-    # Broncos fan / analysis accounts
-    "ThatsGoodSports", "MileHighReport", "BSNBroncos", "InTheNixOfTime",
-    # Nuggets beat writers / media
-    "msaborern", "Harrison_Wind", "LOKOKLASSIFIED", "AdamMaresSBN",
-    "BSNNuggets", "MileHighBasketball",
-    # Denver sports general
-    "AltitudeSR", "DenverChannel", "KOaborern",
-]
-
-# Time windows for rotation (hours back from now)
-WINDOW_OPTIONS = [
-    (0, 8),    # Last 8 hours — very fresh
-    (0, 14),   # Last 14 hours — today's cycle
-    (6, 24),   # 6-24 hours ago — yesterday's evening + today
-    (0, 36),   # Full window — catch-all
-]
 # ========================================
 
 st.set_page_config(page_title="Tweet Hunter", layout="wide", initial_sidebar_state="collapsed")
@@ -198,10 +134,20 @@ if 'current_nuggets_tweets' not in st.session_state:
 if 'trending_topics' not in st.session_state:
     st.session_state.trending_topics = []
 
-if 'scan_version' not in st.session_state:
-    st.session_state.scan_version = 0
+# Keywords
+BRONCOS_KEYWORDS = [
+    "Denver Broncos",        # Most specific - prioritize this
+    "#Broncos",
+    "#BroncosCountry",
+    "Broncos NFL",           # Add NFL context
+    "Bo Nix",
+    "Surtain",
+    "Sean Payton"
+]
 
-# Keywords used for classification (defined in config above)
+NUGGETS_KEYWORDS = [
+    "#Nuggets", "Nuggets", "Denver Nuggets", "Jokic"
+]
 
 def extract_subjects(tweet_text):
     """Extract key subjects/topics from tweet - returns set of subject strings"""
@@ -320,20 +266,20 @@ def calculate_debate_score(metrics, tweet_text):
     
     return score
 
-def is_spam_tweet(tweet, metrics):
-    """Filter out spam tweets - RELAXED for debate tweets"""
+def is_spam_tweet(tweet, metrics, is_recency=False):
+    """Filter out spam tweets - relaxed thresholds for recency searches"""
     total = metrics['reply_count'] + metrics['like_count'] + metrics['retweet_count']
     
     # Allow high-engagement @-replies (debate threads)
-    if tweet.text.startswith('@') and total < 15:
+    if tweet.text.startswith('@') and total < (10 if is_recency else 15):
         return True
     
     # Block excessive mass mentions
     if tweet.text.count('@') >= 15:
         return True
     
-    # Minimum engagement threshold - BACK TO ORIGINAL
-    if total < 8:
+    # Minimum engagement threshold - lower for fresh tweets still building momentum
+    if total < (4 if is_recency else 8):
         return True
     
     return False
@@ -457,103 +403,34 @@ def search_viral_tweets(keywords, hours=36, debate_mode=False, sort_order='relev
         print(f"Search error: {str(e)}")
         return None
 
-def search_account_tweets(accounts, hours=24):
-    """Search for tweets FROM specific accounts (beat writers, team accounts)"""
-    # Twitter API limits OR clauses — batch into chunks of 10
-    chunks = [accounts[i:i+10] for i in range(0, len(accounts), 10)]
-    query_parts = []
-    for chunk in chunks:
-        from_clause = " OR ".join([f"from:{acct}" for acct in chunk])
-        query_parts.append(f"({from_clause})")
-    
-    # Use first chunk (Twitter query length limit)
-    query = f"{query_parts[0]} -is:retweet lang:en"
-    
-    start_time = datetime.utcnow() - timedelta(hours=hours)
-    
-    try:
-        tweets = client_twitter.search_recent_tweets(
-            query=query,
-            max_results=MAX_TWEETS,
-            start_time=start_time,
-            sort_order='recency',
-            tweet_fields=['public_metrics', 'created_at', 'referenced_tweets', 'attachments'],
-            expansions=['author_id', 'attachments.media_keys'],
-            user_fields=['username', 'name'],
-            media_fields=['url', 'preview_image_url', 'type']
-        )
-        return tweets
-    except Exception as e:
-        print(f"Account search error: {str(e)}")
-        return None
-
 def get_top_debate_tweets(exclude_ids=None):
-    """Main processing: Rotated searches + account discovery + scoring + diversity"""
+    """Main processing: 4 core relevancy searches + 2 fresh recency searches + scoring + diversity"""
     
     if exclude_ids is None:
         exclude_ids = set()
     
-    # Increment scan version for rotation
-    scan_version = st.session_state.get('scan_version', 0)
-    st.session_state.scan_version = scan_version + 1
+    # Fresh window: random 12-18h for variety between scans
+    fresh_hours = random.randint(12, 18)
+    fresh_start = datetime.utcnow() - timedelta(hours=fresh_hours)
     
-    # --- ROTATION LOGIC ---
-    # Pick time window (cycles through options)
-    window_idx = scan_version % len(WINDOW_OPTIONS)
-    offset_start, offset_end = WINDOW_OPTIONS[window_idx]
-    window_start = datetime.utcnow() - timedelta(hours=offset_end)
-    
-    # Pick query variants (rotate which ones we use)
-    broncos_variant_idx = scan_version % len(BRONCOS_QUERY_VARIANTS)
-    broncos_variant_2 = (scan_version + 2) % len(BRONCOS_QUERY_VARIANTS)
-    nuggets_variant_idx = scan_version % len(NUGGETS_QUERY_VARIANTS)
-    
-    broncos_kw_1 = BRONCOS_QUERY_VARIANTS[broncos_variant_idx]
-    broncos_kw_2 = BRONCOS_QUERY_VARIANTS[broncos_variant_2]
-    nuggets_kw = NUGGETS_QUERY_VARIANTS[nuggets_variant_idx]
-    
-    # Alternate sort order: even scans = relevancy-heavy, odd = recency-heavy
-    primary_sort = 'relevancy' if scan_version % 2 == 0 else 'recency'
-    secondary_sort = 'recency' if primary_sort == 'relevancy' else 'relevancy'
-    
-    # Fresh window — always last 12 hours for recency pass
-    fresh_start = datetime.utcnow() - timedelta(hours=12)
-    
-    # Pick a random subset of discovery accounts (10 max per query)
-    discovery_sample = random.sample(DISCOVERY_ACCOUNTS, min(10, len(DISCOVERY_ACCOUNTS)))
-    
-    # --- BUILD SEARCH TASKS (6 parallel calls) ---
-    search_tasks = [
-        # 1. Broncos variant A — primary sort, rotated window
-        {'keywords': broncos_kw_1, 'debate_mode': True, 'sort_order': primary_sort, 'start_time': window_start},
-        # 2. Broncos variant B — secondary sort, rotated window
-        {'keywords': broncos_kw_2, 'debate_mode': False, 'sort_order': secondary_sort, 'start_time': window_start},
-        # 3. Broncos fresh — recency, last 12h only
-        {'keywords': BRONCOS_KEYWORDS, 'debate_mode': False, 'sort_order': 'recency', 'start_time': fresh_start},
-        # 4. Nuggets — primary sort, rotated window
-        {'keywords': nuggets_kw, 'debate_mode': True, 'sort_order': primary_sort, 'start_time': window_start},
-        # 5. Nuggets fresh — recency, last 12h
-        {'keywords': NUGGETS_KEYWORDS, 'debate_mode': False, 'sort_order': 'recency', 'start_time': fresh_start},
-    ]
-    
-    # Execute keyword searches + account discovery in parallel
+    # Run 6 searches IN PARALLEL
+    # Core 4: UNCHANGED from baseline (relevancy, full 36h window)
+    # Fresh 2: ADDED on top (recency, recent 12-18h slice)
     with ThreadPoolExecutor(max_workers=6) as executor:
-        keyword_futures = [
-            executor.submit(
-                search_viral_tweets,
-                t['keywords'],
-                HOURS_BACK,
-                t['debate_mode'],
-                t['sort_order'],
-                t['start_time']
-            )
-            for t in search_tasks
-        ]
-        # 6. Account discovery — always fresh
-        account_future = executor.submit(search_account_tweets, discovery_sample, 24)
-        
-        results = [f.result() for f in keyword_futures]
-        results.append(account_future.result())
+        futures = {
+            # --- CORE 4: identical to baseline ---
+            'broncos_normal': executor.submit(search_viral_tweets, BRONCOS_KEYWORDS, HOURS_BACK, False),
+            'broncos_debate': executor.submit(search_viral_tweets, BRONCOS_KEYWORDS, HOURS_BACK, True),
+            'nuggets_normal': executor.submit(search_viral_tweets, NUGGETS_KEYWORDS, HOURS_BACK, False),
+            'nuggets_debate': executor.submit(search_viral_tweets, NUGGETS_KEYWORDS, HOURS_BACK, True),
+            # --- FRESH 2: additive recency injection ---
+            'broncos_fresh': executor.submit(search_viral_tweets, BRONCOS_KEYWORDS, fresh_hours, False, 'recency', fresh_start),
+            'nuggets_fresh': executor.submit(search_viral_tweets, NUGGETS_KEYWORDS, fresh_hours, False, 'recency', fresh_start),
+        }
+        results = {name: f.result() for name, f in futures.items()}
+    
+    # Track which results came from recency searches
+    recency_sources = {'broncos_fresh', 'nuggets_fresh'}
     
     all_tweets = []
     seen_ids = set()
@@ -563,24 +440,29 @@ def get_top_debate_tweets(exclude_ids=None):
     # Debug counters
     stats = {
         'total_raw': 0,
+        'total_raw_core': 0,
+        'total_raw_fresh': 0,
         'filtered_spam': 0,
         'filtered_not_original': 0,
         'filtered_rugby': 0,
         'filtered_duplicate': 0,
         'kept': 0,
-        'scan_version': scan_version,
-        'window': f"{offset_start}-{offset_end}h ago",
-        'primary_sort': primary_sort,
-        'broncos_variants': f"#{broncos_variant_idx}, #{broncos_variant_2}",
-        'nuggets_variant': f"#{nuggets_variant_idx}",
+        'kept_fresh': 0,
+        'fresh_window': f"{fresh_hours}h"
     }
     
-    # Process all search results
-    for tweets_obj in results:
+    # Process all 6 search results
+    for source_name, tweets_obj in results.items():
         if not tweets_obj or not tweets_obj.data:
             continue
         
+        is_recency = source_name in recency_sources
+        
         stats['total_raw'] += len(tweets_obj.data)
+        if is_recency:
+            stats['total_raw_fresh'] += len(tweets_obj.data)
+        else:
+            stats['total_raw_core'] += len(tweets_obj.data)
         
         # Collect users
         if hasattr(tweets_obj, 'includes') and tweets_obj.includes and 'users' in tweets_obj.includes:
@@ -604,7 +486,8 @@ def get_top_debate_tweets(exclude_ids=None):
             
             metrics = tweet.public_metrics
             
-            if is_spam_tweet(tweet, metrics):
+            # Use relaxed spam thresholds for recency tweets (still building engagement)
+            if is_spam_tweet(tweet, metrics, is_recency=is_recency):
                 stats['filtered_spam'] += 1
                 continue
             
@@ -622,26 +505,31 @@ def get_top_debate_tweets(exclude_ids=None):
             
             stats['kept'] += 1
             
+            # Calculate debate score
             score = calculate_debate_score(metrics, tweet.text)
             priority_info = determine_priority(tweet.text)
             subjects = extract_subjects(tweet.text)
             
             user = all_users.get(tweet.author_id)
             
-            # Freshness bonus — tweets < 6h old get a score bump
-            tweet_age_hours = 999
+            # Freshness bonus — tweets < 6h old get a score bump to compete with older viral tweets
             is_fresh = False
+            age_hours = 999
             if tweet.created_at:
                 try:
                     age = datetime.utcnow() - tweet.created_at.replace(tzinfo=None)
-                    tweet_age_hours = age.total_seconds() / 3600
-                    if tweet_age_hours < 6:
+                    age_hours = age.total_seconds() / 3600
+                    if age_hours < 6:
                         score += 100000  # Fresh tweet bonus
                         is_fresh = True
-                    elif tweet_age_hours < 12:
+                    elif age_hours < 12:
                         score += 50000   # Moderately fresh bonus
+                        is_fresh = True
                 except:
                     pass
+            
+            if is_fresh:
+                stats['kept_fresh'] += 1
             
             # Attach media
             tweet_media = []
@@ -664,7 +552,7 @@ def get_top_debate_tweets(exclude_ids=None):
                 'subjects': subjects,
                 'media': tweet_media,
                 'is_fresh': is_fresh,
-                'age_hours': round(tweet_age_hours, 1)
+                'age_hours': round(age_hours, 1)
             })
             
             seen_ids.add(tweet.id)
@@ -672,7 +560,7 @@ def get_top_debate_tweets(exclude_ids=None):
     # Sort all tweets by debate score
     all_tweets.sort(key=lambda x: x['debate_score'], reverse=True)
     
-    # DIVERSITY ENFORCEMENT: Max 2 tweets per subject (unchanged)
+    # DIVERSITY ENFORCEMENT: Max 2 tweets per subject
     broncos_keywords_lower = [k.lower() for k in BRONCOS_KEYWORDS]
     nuggets_keywords_lower = [k.lower() for k in NUGGETS_KEYWORDS]
     
@@ -789,13 +677,11 @@ def display_tweet_card(tweet, is_top_pick=False, pick_number=None):
         # Show primary subject
         header_html += f'<span class="subject-badge">📌 {primary_subject}</span>'
         
-        # Freshness badge
+        # Freshness badge for tweets < 12h old
         if tweet.get('is_fresh'):
             age = tweet.get('age_hours', 0)
             if age < 1:
                 fresh_label = "🆕 <1h old"
-            elif age < 3:
-                fresh_label = f"🆕 {age:.0f}h old"
             else:
                 fresh_label = f"🆕 {age:.0f}h old"
             header_html += f'<span style="background-color: #00ba7c; color: white; padding: 3px 8px; border-radius: 10px; font-size: 10px; font-weight: bold; margin-left: 6px;">{fresh_label}</span>'
@@ -1427,15 +1313,15 @@ if st.session_state.current_broncos_tweets or st.session_state.current_nuggets_t
         # Show filter stats if available
         if 'filter_stats' in st.session_state:
             stats = st.session_state.filter_stats
-            with st.expander("📊 Scan Info — Algorithm Rotation + Filters"):
-                st.write(f"**🔄 Scan #{stats.get('scan_version', '?')}** — Window: {stats.get('window', '?')} | Sort: {stats.get('primary_sort', '?')} | Broncos variants: {stats.get('broncos_variants', '?')} | Nuggets variant: {stats.get('nuggets_variant', '?')}")
-                st.write(f"**Raw tweets from API:** {stats['total_raw']}")
+            with st.expander("📊 Scan Info — Search Breakdown + Filters"):
+                st.write(f"**Raw tweets from API:** {stats['total_raw']} (core: {stats.get('total_raw_core', '?')} + fresh: {stats.get('total_raw_fresh', '?')})")
+                st.write(f"**Fresh recency window:** last {stats.get('fresh_window', '?')}")
                 st.write(f"**Filtered out:**")
                 st.write(f"- Spam: {stats['filtered_spam']}")
                 st.write(f"- Not original: {stats['filtered_not_original']}")
                 st.write(f"- Rugby/Brisbane Broncos: {stats['filtered_rugby']}")
                 st.write(f"- Duplicates: {stats['filtered_duplicate']}")
-                st.write(f"**Kept after filters:** {stats['kept']}")
+                st.write(f"**Kept after filters:** {stats['kept']} ({stats.get('kept_fresh', 0)} fresh tweets)")
                 st.write(f"**Final after diversity enforcement:** {len(top_broncos)} Broncos + {len(top_nuggets)} Nuggets")
     
     top_broncos = st.session_state.current_broncos_tweets
