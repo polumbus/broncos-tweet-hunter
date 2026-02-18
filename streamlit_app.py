@@ -3,6 +3,8 @@ import tweepy
 from anthropic import Anthropic
 from datetime import datetime, timedelta
 import os
+import json
+from pathlib import Path
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 
@@ -12,6 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 TESTING_MODE = False
 MAX_TWEETS = 100
 HOURS_BACK = 36
+SCAN_HISTORY_FILE = Path("scan_history.json")
 # ========================================
 
 st.set_page_config(page_title="Broncos Tweet Hunter", layout="wide", initial_sidebar_state="collapsed")
@@ -123,6 +126,9 @@ if 'current_broncos_tweets' not in st.session_state:
 
 if 'current_nuggets_tweets' not in st.session_state:
     st.session_state.current_nuggets_tweets = []
+
+if 'trending_topics' not in st.session_state:
+    st.session_state.trending_topics = []
 
 # Keywords
 BRONCOS_KEYWORDS = [
@@ -675,6 +681,187 @@ Return ONLY valid JSON:
             "Reply": f"ERROR: {str(e)}"
         }
 
+# ========================================
+# SCAN HISTORY PERSISTENCE
+# ========================================
+
+def save_scan_to_history(broncos_tweets, nuggets_tweets):
+    """Save scan results to persistent JSON for weekly rollup tracking"""
+    history = load_scan_history(days=30)  # Keep 30 days
+    
+    # Build topic snapshot from this scan
+    topic_data = defaultdict(lambda: {"tweet_count": 0, "total_replies": 0, "total_retweets": 0, "total_likes": 0, "sample_tweets": []})
+    
+    for tweet in broncos_tweets + nuggets_tweets:
+        for subject in tweet['subjects']:
+            td = topic_data[subject]
+            td["tweet_count"] += 1
+            td["total_replies"] += tweet['replies']
+            td["total_retweets"] += tweet['retweets']
+            td["total_likes"] += tweet['likes']
+            if len(td["sample_tweets"]) < 2:  # Keep top 2 sample tweets per subject
+                td["sample_tweets"].append(tweet['text'][:200])
+    
+    scan_entry = {
+        "timestamp": datetime.utcnow().isoformat(),
+        "broncos_count": len(broncos_tweets),
+        "nuggets_count": len(nuggets_tweets),
+        "topics": {k: dict(v) for k, v in topic_data.items()}
+    }
+    
+    history.append(scan_entry)
+    
+    try:
+        SCAN_HISTORY_FILE.write_text(json.dumps(history, indent=2, default=str))
+    except Exception as e:
+        print(f"Failed to save scan history: {e}")
+
+def load_scan_history(days=7):
+    """Load scan history, filtering to the last N days"""
+    if not SCAN_HISTORY_FILE.exists():
+        return []
+    
+    try:
+        all_history = json.loads(SCAN_HISTORY_FILE.read_text())
+        cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
+        return [entry for entry in all_history if entry.get("timestamp", "") >= cutoff]
+    except Exception:
+        return []
+
+# ========================================
+# TRENDING TOPICS (Current Scan)
+# ========================================
+
+def get_trending_topics(broncos_tweets, nuggets_tweets):
+    """Aggregate current scan by subject — returns sorted list of topic dicts"""
+    topic_agg = defaultdict(lambda: {
+        "tweet_count": 0,
+        "total_replies": 0,
+        "total_retweets": 0,
+        "total_likes": 0,
+        "total_engagement": 0,
+        "top_tweet": None,
+        "top_tweet_score": 0
+    })
+    
+    for tweet in broncos_tweets + nuggets_tweets:
+        for subject in tweet['subjects']:
+            ta = topic_agg[subject]
+            ta["tweet_count"] += 1
+            ta["total_replies"] += tweet['replies']
+            ta["total_retweets"] += tweet['retweets']
+            ta["total_likes"] += tweet['likes']
+            engagement = tweet['replies'] + tweet['retweets'] + tweet['likes']
+            ta["total_engagement"] += engagement
+            if engagement > ta["top_tweet_score"]:
+                ta["top_tweet_score"] = engagement
+                ta["top_tweet"] = tweet['text'][:150]
+    
+    # Sort by total engagement
+    sorted_topics = sorted(
+        [{"subject": k, **v} for k, v in topic_agg.items()],
+        key=lambda x: x["total_engagement"],
+        reverse=True
+    )
+    
+    return sorted_topics
+
+# ========================================
+# WEEKLY ROLLUP / PODCAST IDEAS
+# ========================================
+
+def get_weekly_topic_summary():
+    """Aggregate 7 days of scan history into topic rankings"""
+    history = load_scan_history(days=7)
+    
+    if not history:
+        return [], 0
+    
+    weekly_agg = defaultdict(lambda: {
+        "appearances": 0,  # How many scans this topic showed up in
+        "total_tweets": 0,
+        "total_replies": 0,
+        "total_retweets": 0,
+        "total_likes": 0,
+        "total_engagement": 0,
+        "sample_tweets": []
+    })
+    
+    for scan in history:
+        for subject, data in scan.get("topics", {}).items():
+            wa = weekly_agg[subject]
+            wa["appearances"] += 1
+            wa["total_tweets"] += data.get("tweet_count", 0)
+            wa["total_replies"] += data.get("total_replies", 0)
+            wa["total_retweets"] += data.get("total_retweets", 0)
+            wa["total_likes"] += data.get("total_likes", 0)
+            wa["total_engagement"] += (
+                data.get("total_replies", 0) + 
+                data.get("total_retweets", 0) + 
+                data.get("total_likes", 0)
+            )
+            for st_text in data.get("sample_tweets", []):
+                if len(wa["sample_tweets"]) < 4:
+                    wa["sample_tweets"].append(st_text)
+    
+    sorted_weekly = sorted(
+        [{"subject": k, **v} for k, v in weekly_agg.items()],
+        key=lambda x: x["total_engagement"],
+        reverse=True
+    )
+    
+    return sorted_weekly, len(history)
+
+def generate_podcast_ideas(weekly_topics):
+    """Use Claude to generate 3 podcast episode ideas from the week's hottest topics"""
+    
+    # Build context from top topics
+    top_topics = weekly_topics[:8]  # Send top 8 topics for context
+    topic_context = ""
+    for i, topic in enumerate(top_topics, 1):
+        topic_context += f"\n{i}. **{topic['subject']}** — {topic['total_tweets']} tweets, {topic['total_replies']} replies, {topic['total_retweets']} RTs, appeared in {topic['appearances']} scans"
+        if topic['sample_tweets']:
+            topic_context += f"\n   Sample takes: {' | '.join(topic['sample_tweets'][:2])}"
+    
+    prompt = f'''You are a podcast content strategist for Tyler Polumbus — former Denver Broncos offensive lineman (Super Bowl 50 champion), current radio host on Altitude 92.5 (12-3 PM MST), and host of the "Mount Polumbus Speaks" podcast. He played 8 NFL seasons as an undrafted free agent and started over 60 games.
+
+Here are the hottest topics from Denver sports Twitter this week, ranked by total engagement:
+{topic_context}
+
+Generate exactly 3 podcast episode ideas based on what's driving the most debate. For each:
+
+1. **EPISODE TITLE** — Catchy, clickable title
+2. **THE HOOK** — The central debate or question that will pull listeners in (1-2 sentences)
+3. **TYLER'S ANGLE** — What unique perspective can Tyler bring as a former player/insider that fans can't get elsewhere? (2-3 sentences)
+4. **SEGMENT BREAKDOWN** — 3 segments for a 30-45 min episode (one line each)
+5. **SPICY TAKE** — One bold, quotable opinion Tyler could lead with to drive social media clips
+
+Prioritize topics with high reply counts (that means debate) and topics that appeared across multiple scans (sustained interest, not just a flash).
+
+Return valid JSON array:
+[
+  {{
+    "title": "...",
+    "hook": "...",
+    "tylers_angle": "...",
+    "segments": ["...", "...", "..."],
+    "spicy_take": "..."
+  }}
+]'''
+    
+    try:
+        message = client.messages.create(
+            model="claude-sonnet-4-5-20250929",
+            max_tokens=2000,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        
+        response_text = message.content[0].text
+        clean_response = response_text.replace('```json', '').replace('```', '').strip()
+        return json.loads(clean_response)
+    except Exception as e:
+        return [{"title": f"ERROR: {str(e)}", "hook": "", "tylers_angle": "", "segments": [], "spicy_take": ""}]
+
 # Button section
 col1, col2, col3 = st.columns([3, 3, 1.5])
 
@@ -717,6 +904,12 @@ if scan_button or scan_new_button:
         # Track newly shown tweets
         for tweet in top_broncos + top_nuggets:
             st.session_state.shown_tweet_ids.add(tweet['id'])
+        
+        # Save scan to persistent history for weekly rollup
+        save_scan_to_history(top_broncos, top_nuggets)
+        
+        # Calculate trending topics for this scan
+        st.session_state.trending_topics = get_trending_topics(top_broncos, top_nuggets)
 
 # Display tweets from session state (so they persist across reruns)
 if st.session_state.current_broncos_tweets or st.session_state.current_nuggets_tweets:
@@ -741,6 +934,66 @@ if st.session_state.current_broncos_tweets or st.session_state.current_nuggets_t
     top_nuggets = st.session_state.current_nuggets_tweets
     
     st.success(f"✅ Found {len(top_broncos)} Broncos + {len(top_nuggets)} Nuggets debates with max variety!")
+    
+    # ========================================
+    # 📈 TRENDING TOPICS SECTION
+    # ========================================
+    if 'trending_topics' in st.session_state and st.session_state.trending_topics:
+        trending = st.session_state.trending_topics
+        
+        with st.expander("📈 TRENDING TOPICS — What's Heating Up Right Now", expanded=True):
+            # Show top topics as metric cards
+            top_count = min(6, len(trending))
+            cols = st.columns(min(3, top_count))
+            
+            for i in range(top_count):
+                topic = trending[i]
+                col_idx = i % 3
+                with cols[col_idx]:
+                    # Color-code by engagement level
+                    if i == 0:
+                        badge_color = "#f91880"  # Hot pink — #1
+                        label = "🔥"
+                    elif i <= 2:
+                        badge_color = "#ff6b35"  # Orange — top 3
+                        label = "⚡"
+                    else:
+                        badge_color = "#536471"  # Gray — others
+                        label = "📊"
+                    
+                    st.markdown(f'''
+                        <div style="background-color: #16181c; border: 1px solid {badge_color}; border-radius: 12px; padding: 14px; margin-bottom: 10px;">
+                            <div style="font-size: 11px; color: {badge_color}; font-weight: bold; margin-bottom: 4px;">{label} #{i+1} TRENDING</div>
+                            <div style="font-size: 16px; font-weight: bold; color: #e7e9ea; margin-bottom: 8px;">{topic["subject"]}</div>
+                            <div style="display: flex; gap: 12px; font-size: 12px; color: #71767b;">
+                                <span>💬 {topic["total_replies"]} replies</span>
+                                <span>🔄 {topic["total_retweets"]} RTs</span>
+                                <span>❤️ {topic["total_likes"]}</span>
+                            </div>
+                            <div style="font-size: 11px; color: #536471; margin-top: 6px;">{topic["tweet_count"]} tweets found</div>
+                        </div>
+                    ''', unsafe_allow_html=True)
+            
+            # Engagement bar chart
+            if len(trending) >= 3:
+                st.markdown("**Engagement Breakdown:**")
+                max_eng = trending[0]["total_engagement"] if trending[0]["total_engagement"] > 0 else 1
+                for topic in trending[:8]:
+                    bar_pct = int((topic["total_engagement"] / max_eng) * 100)
+                    bar_color = "#1d9bf0" if "Broncos" not in topic["subject"] and "Nuggets" not in topic["subject"] else ("#fb4f14" if "Nix" in topic["subject"] or "Payton" in topic["subject"] or "Broncos" in topic["subject"] else "#ffd700")
+                    st.markdown(f'''
+                        <div style="display: flex; align-items: center; margin-bottom: 4px;">
+                            <div style="width: 140px; font-size: 12px; color: #e7e9ea; flex-shrink: 0;">{topic["subject"]}</div>
+                            <div style="flex: 1; background-color: #2f3336; border-radius: 4px; height: 20px; overflow: hidden;">
+                                <div style="width: {bar_pct}%; background-color: {bar_color}; height: 100%; border-radius: 4px; display: flex; align-items: center; padding-left: 8px;">
+                                    <span style="font-size: 10px; color: white; font-weight: bold;">{topic["total_engagement"]}</span>
+                                </div>
+                            </div>
+                        </div>
+                    ''', unsafe_allow_html=True)
+                st.markdown("")  # Spacer
+    
+    st.markdown("---")
     
     if top_broncos:
         top_3_count = min(3, len(top_broncos))
@@ -967,3 +1220,138 @@ else:
     # No tweets in session state yet
     if scan_button or scan_new_button:
         st.warning("⚠️ No viral debates found in the last 36 hours. Try again later!")
+
+# ========================================
+# 🎙️ WEEKLY ROLLUP — PODCAST IDEAS
+# ========================================
+st.markdown("---")
+st.markdown("## 🎙️ Weekly Rollup — Podcast Ideas")
+
+# Load weekly data
+weekly_topics, scan_count = get_weekly_topic_summary()
+
+if scan_count == 0:
+    st.info("📭 No scan history yet. Run a few scans over the week and this section will populate with podcast ideas based on the hottest debates.")
+else:
+    st.caption(f"Based on **{scan_count} scans** over the last 7 days")
+    
+    # Show weekly topic leaderboard
+    if weekly_topics:
+        with st.expander("📊 Weekly Topic Leaderboard", expanded=False):
+            for i, topic in enumerate(weekly_topics[:12]):
+                # Medal for top 3
+                if i == 0:
+                    medal = "🥇"
+                elif i == 1:
+                    medal = "🥈"
+                elif i == 2:
+                    medal = "🥉"
+                else:
+                    medal = f"#{i+1}"
+                
+                freq_bar = "🟧" * min(topic["appearances"], 10)
+                
+                st.markdown(f'''
+                    <div style="background-color: #16181c; border: 1px solid #2f3336; border-radius: 8px; padding: 10px 14px; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <span style="font-size: 14px; margin-right: 8px;">{medal}</span>
+                            <strong style="color: #e7e9ea; font-size: 14px;">{topic["subject"]}</strong>
+                            <span style="color: #536471; font-size: 11px; margin-left: 10px;">appeared in {topic["appearances"]}/{scan_count} scans</span>
+                        </div>
+                        <div style="font-size: 12px; color: #71767b;">
+                            💬 {topic["total_replies"]} · 🔄 {topic["total_retweets"]} · ❤️ {topic["total_likes"]} · 📝 {topic["total_tweets"]} tweets
+                        </div>
+                    </div>
+                ''', unsafe_allow_html=True)
+    
+    # Generate podcast ideas button
+    st.markdown("")
+    
+    podcast_col1, podcast_col2 = st.columns([3, 1])
+    
+    with podcast_col1:
+        generate_ideas_btn = st.button(
+            "🎙️ Generate 3 Podcast Episode Ideas from This Week's Hottest Debates",
+            use_container_width=True,
+            type="primary"
+        )
+    
+    with podcast_col2:
+        if st.button("🗑️ Clear History", use_container_width=True):
+            try:
+                SCAN_HISTORY_FILE.unlink(missing_ok=True)
+                if 'podcast_ideas' in st.session_state:
+                    del st.session_state['podcast_ideas']
+                st.success("History cleared!")
+                st.rerun()
+            except Exception:
+                st.error("Failed to clear history")
+    
+    if generate_ideas_btn:
+        if len(weekly_topics) < 2:
+            st.warning("Need more scan data to generate good ideas. Run a few more scans!")
+        else:
+            with st.spinner("🧠 Claude is cooking up podcast ideas from this week's hottest debates..."):
+                ideas = generate_podcast_ideas(weekly_topics)
+                st.session_state.podcast_ideas = ideas
+    
+    # Display podcast ideas
+    if 'podcast_ideas' in st.session_state:
+        ideas = st.session_state.podcast_ideas
+        
+        st.markdown("### 🎯 Your Podcast Episode Ideas")
+        
+        for i, idea in enumerate(ideas):
+            episode_num = i + 1
+            
+            # Color by rank
+            if episode_num == 1:
+                border_color = "#f91880"
+                rank_label = "🔥 TOP PICK"
+            elif episode_num == 2:
+                border_color = "#ff6b35"
+                rank_label = "⚡ STRONG"
+            else:
+                border_color = "#1d9bf0"
+                rank_label = "💡 SOLID"
+            
+            st.markdown(f'''
+                <div style="background-color: #1a2332; border: 2px solid {border_color}; border-radius: 16px; padding: 20px; margin: 16px 0;">
+                    <div style="font-size: 11px; color: {border_color}; font-weight: bold; margin-bottom: 6px;">{rank_label} — EPISODE IDEA #{episode_num}</div>
+                    <div style="font-size: 20px; font-weight: bold; color: #e7e9ea; margin-bottom: 12px;">🎙️ {idea.get("title", "Untitled")}</div>
+                    
+                    <div style="margin-bottom: 12px;">
+                        <div style="font-size: 11px; color: #1d9bf0; font-weight: bold; margin-bottom: 4px;">THE HOOK</div>
+                        <div style="font-size: 14px; color: #e7e9ea; line-height: 1.5;">{idea.get("hook", "")}</div>
+                    </div>
+                    
+                    <div style="margin-bottom: 12px;">
+                        <div style="font-size: 11px; color: #1d9bf0; font-weight: bold; margin-bottom: 4px;">TYLER'S ANGLE</div>
+                        <div style="font-size: 14px; color: #e7e9ea; line-height: 1.5;">{idea.get("tylers_angle", "")}</div>
+                    </div>
+                </div>
+            ''', unsafe_allow_html=True)
+            
+            # Segments and spicy take in expandable section
+            with st.expander(f"📋 Segments & Spicy Take — Episode #{episode_num}", expanded=False):
+                segments = idea.get("segments", [])
+                if segments:
+                    st.markdown("**Segment Breakdown:**")
+                    for j, seg in enumerate(segments, 1):
+                        st.markdown(f"**Segment {j}:** {seg}")
+                
+                spicy = idea.get("spicy_take", "")
+                if spicy:
+                    st.markdown(f'''
+                        <div style="background-color: #2d1a1a; border-left: 3px solid #f91880; padding: 12px; margin-top: 12px; border-radius: 8px;">
+                            <div style="font-size: 11px; color: #f91880; font-weight: bold; margin-bottom: 4px;">🌶️ SPICY TAKE — Lead with this for clips</div>
+                            <div style="font-size: 15px; color: #e7e9ea; font-style: italic;">"{spicy}"</div>
+                        </div>
+                    ''', unsafe_allow_html=True)
+                
+                # Copy button for the spicy take
+                if spicy:
+                    if st.button(f"📋 Copy Spicy Take", key=f"copy_spicy_{i}", use_container_width=True):
+                        st.code(spicy, language=None)
+            
+            st.markdown("")
