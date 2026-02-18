@@ -8,6 +8,7 @@ from pathlib import Path
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import quote_plus
+import html as html_lib
 
 # ========================================
 # PRODUCTION MODE
@@ -629,13 +630,8 @@ def display_tweet_card(tweet, is_top_pick=False, pick_number=None):
                     pass
         
         metric_style = "metric-high" if is_top_pick else ""
-        st.markdown(f'''
-            <div style="display: flex; gap: 20px; color: #71767b; font-size: 13px; margin: 12px 0;">
-                <span class="{metric_style}">💬 {tweet['replies']} replies</span>
-                <span class="{metric_style}">🔄 {tweet['retweets']} RTs</span>
-                <span class="{metric_style}">❤️ {tweet['likes']}</span>
-            </div>
-        ''', unsafe_allow_html=True)
+        metrics_html = f'<div style="display: flex; gap: 20px; color: #71767b; font-size: 13px; margin: 12px 0;"><span class="{metric_style}">💬 {tweet["replies"]} replies</span><span class="{metric_style}">🔄 {tweet["retweets"]} RTs</span><span class="{metric_style}">❤️ {tweet["likes"]}</span></div>'
+        st.markdown(metrics_html, unsafe_allow_html=True)
         
         st.markdown(f'<a href="{tweet_url}" target="_blank" style="color: #1d9bf0; text-decoration: none;">🔗 View on Twitter →</a>', unsafe_allow_html=True)
 
@@ -730,11 +726,8 @@ Return valid JSON array of strings:
 
 def display_thread(thread_tweets, key_prefix):
     """Display a generated thread with editable text areas and copy buttons"""
-    st.markdown(f'''
-        <div style="background-color: #16181c; border: 1px solid #1d9bf0; border-radius: 12px; padding: 16px; margin: 8px 0;">
-            <div style="font-size: 13px; color: #1d9bf0; font-weight: bold; margin-bottom: 10px;">🧵 THREAD ({len(thread_tweets)} tweets)</div>
-        </div>
-    ''', unsafe_allow_html=True)
+    thread_header = f'<div style="background-color: #16181c; border: 1px solid #1d9bf0; border-radius: 12px; padding: 16px; margin: 8px 0;"><div style="font-size: 13px; color: #1d9bf0; font-weight: bold; margin-bottom: 10px;">🧵 THREAD ({len(thread_tweets)} tweets)</div></div>'
+    st.markdown(thread_header, unsafe_allow_html=True)
     
     for j, tweet_text in enumerate(thread_tweets):
         edited = st.text_area(
@@ -1333,45 +1326,42 @@ if st.session_state.current_broncos_tweets or st.session_state.current_nuggets_t
                 st.caption("Read during commercial breaks. Each topic = ~5 min segment.")
                 
                 for sp_idx, segment in enumerate(st.session_state.show_prep):
-                    topic_name = segment.get('topic', 'Unknown')
-                    open_with = segment.get('open_with', '')
-                    facts = segment.get('key_facts', [])
-                    take = segment.get('tylers_take', '')
-                    caller_q = segment.get('caller_question', '')
-                    transition = segment.get('transition', '')
+                    topic_name = html_lib.escape(str(segment.get('topic', 'Unknown')))
+                    open_with = html_lib.escape(str(segment.get('open_with', '')))
+                    facts = [html_lib.escape(str(f)) for f in segment.get('key_facts', [])]
+                    take = html_lib.escape(str(segment.get('tylers_take', '')))
+                    caller_q = html_lib.escape(str(segment.get('caller_question', '')))
+                    transition = html_lib.escape(str(segment.get('transition', '')))
                     
                     # Segment colors
                     seg_colors = ["#f91880", "#ff6b35", "#1d9bf0", "#00ba7c"]
                     seg_color = seg_colors[sp_idx % len(seg_colors)]
                     
-                    st.markdown(f'''
-                        <div style="background-color: #16181c; border-left: 4px solid {seg_color}; border-radius: 8px; padding: 16px; margin: 12px 0;">
-                            <div style="font-size: 11px; color: {seg_color}; font-weight: bold; margin-bottom: 4px;">SEGMENT {sp_idx + 1}</div>
-                            <div style="font-size: 18px; font-weight: bold; color: #e7e9ea; margin-bottom: 10px;">{topic_name}</div>
-                            
-                            <div style="margin-bottom: 10px;">
-                                <div style="font-size: 11px; color: #1d9bf0; font-weight: bold;">🎤 OPEN WITH:</div>
-                                <div style="font-size: 14px; color: #e7e9ea; line-height: 1.4;">"{open_with}"</div>
-                            </div>
-                            
-                            <div style="margin-bottom: 10px;">
-                                <div style="font-size: 11px; color: #1d9bf0; font-weight: bold;">📌 KEY FACTS:</div>
-                                {"".join(f'<div style="font-size: 13px; color: #c4cad0; margin-left: 8px; line-height: 1.4;">• {fact}</div>' for fact in facts)}
-                            </div>
-                            
-                            <div style="margin-bottom: 10px;">
-                                <div style="font-size: 11px; color: #1d9bf0; font-weight: bold;">💪 TYLER'S TAKE:</div>
-                                <div style="font-size: 14px; color: #e7e9ea; font-style: italic; line-height: 1.4;">"{take}"</div>
-                            </div>
-                            
-                            <div style="background-color: #1a2332; border-radius: 8px; padding: 10px; margin-bottom: 8px;">
-                                <div style="font-size: 11px; color: #ff6b35; font-weight: bold;">📞 CALLER QUESTION:</div>
-                                <div style="font-size: 14px; color: #e7e9ea;">"{caller_q}"</div>
-                            </div>
-                            
-                            <div style="font-size: 12px; color: #536471; font-style: italic;">➡️ Transition: {transition}</div>
-                        </div>
-                    ''', unsafe_allow_html=True)
+                    facts_html = "".join(f'<div style="font-size: 13px; color: #c4cad0; margin-left: 8px; line-height: 1.4;">• {fact}</div>' for fact in facts)
+                    
+                    segment_html = f'''<div style="background-color: #16181c; border-left: 4px solid {seg_color}; border-radius: 8px; padding: 16px; margin: 12px 0;">
+<div style="font-size: 11px; color: {seg_color}; font-weight: bold; margin-bottom: 4px;">SEGMENT {sp_idx + 1}</div>
+<div style="font-size: 18px; font-weight: bold; color: #e7e9ea; margin-bottom: 10px;">{topic_name}</div>
+<div style="margin-bottom: 10px;">
+<div style="font-size: 11px; color: #1d9bf0; font-weight: bold;">🎤 OPEN WITH:</div>
+<div style="font-size: 14px; color: #e7e9ea; line-height: 1.4;">&ldquo;{open_with}&rdquo;</div>
+</div>
+<div style="margin-bottom: 10px;">
+<div style="font-size: 11px; color: #1d9bf0; font-weight: bold;">📌 KEY FACTS:</div>
+{facts_html}
+</div>
+<div style="margin-bottom: 10px;">
+<div style="font-size: 11px; color: #1d9bf0; font-weight: bold;">💪 TYLER'S TAKE:</div>
+<div style="font-size: 14px; color: #e7e9ea; font-style: italic; line-height: 1.4;">&ldquo;{take}&rdquo;</div>
+</div>
+<div style="background-color: #1a2332; border-radius: 8px; padding: 10px; margin-bottom: 8px;">
+<div style="font-size: 11px; color: #ff6b35; font-weight: bold;">📞 CALLER QUESTION:</div>
+<div style="font-size: 14px; color: #e7e9ea;">&ldquo;{caller_q}&rdquo;</div>
+</div>
+<div style="font-size: 12px; color: #536471; font-style: italic;">➡️ Transition: {transition}</div>
+</div>'''
+                    
+                    st.markdown(segment_html, unsafe_allow_html=True)
     
     st.markdown("---")
     
@@ -1664,18 +1654,9 @@ else:
                 
                 freq_bar = "🟧" * min(topic["appearances"], 10)
                 
-                st.markdown(f'''
-                    <div style="background-color: #16181c; border: 1px solid #2f3336; border-radius: 8px; padding: 10px 14px; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
-                        <div>
-                            <span style="font-size: 14px; margin-right: 8px;">{medal}</span>
-                            <strong style="color: #e7e9ea; font-size: 14px;">{topic["subject"]}</strong>
-                            <span style="color: #536471; font-size: 11px; margin-left: 10px;">appeared in {topic["appearances"]}/{scan_count} scans</span>
-                        </div>
-                        <div style="font-size: 12px; color: #71767b;">
-                            💬 {topic["total_replies"]} · 🔄 {topic["total_retweets"]} · ❤️ {topic["total_likes"]} · 📝 {topic["total_tweets"]} tweets
-                        </div>
-                    </div>
-                ''', unsafe_allow_html=True)
+                subj_escaped = html_lib.escape(str(topic["subject"]))
+                leaderboard_html = f'<div style="background-color: #16181c; border: 1px solid #2f3336; border-radius: 8px; padding: 10px 14px; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;"><div><span style="font-size: 14px; margin-right: 8px;">{medal}</span><strong style="color: #e7e9ea; font-size: 14px;">{subj_escaped}</strong><span style="color: #536471; font-size: 11px; margin-left: 10px;">appeared in {topic["appearances"]}/{scan_count} scans</span></div><div style="font-size: 12px; color: #71767b;">💬 {topic["total_replies"]} · 🔄 {topic["total_retweets"]} · ❤️ {topic["total_likes"]} · 📝 {topic["total_tweets"]} tweets</div></div>'
+                st.markdown(leaderboard_html, unsafe_allow_html=True)
     
     # Generate podcast ideas button
     st.markdown("")
@@ -1728,22 +1709,23 @@ else:
                 border_color = "#1d9bf0"
                 rank_label = "💡 SOLID"
             
-            st.markdown(f'''
-                <div style="background-color: #1a2332; border: 2px solid {border_color}; border-radius: 16px; padding: 20px; margin: 16px 0;">
-                    <div style="font-size: 11px; color: {border_color}; font-weight: bold; margin-bottom: 6px;">{rank_label} — EPISODE IDEA #{episode_num}</div>
-                    <div style="font-size: 20px; font-weight: bold; color: #e7e9ea; margin-bottom: 12px;">🎙️ {idea.get("title", "Untitled")}</div>
-                    
-                    <div style="margin-bottom: 12px;">
-                        <div style="font-size: 11px; color: #1d9bf0; font-weight: bold; margin-bottom: 4px;">THE HOOK</div>
-                        <div style="font-size: 14px; color: #e7e9ea; line-height: 1.5;">{idea.get("hook", "")}</div>
-                    </div>
-                    
-                    <div style="margin-bottom: 12px;">
-                        <div style="font-size: 11px; color: #1d9bf0; font-weight: bold; margin-bottom: 4px;">TYLER'S ANGLE</div>
-                        <div style="font-size: 14px; color: #e7e9ea; line-height: 1.5;">{idea.get("tylers_angle", "")}</div>
-                    </div>
-                </div>
-            ''', unsafe_allow_html=True)
+            ep_title = html_lib.escape(str(idea.get("title", "Untitled")))
+            ep_hook = html_lib.escape(str(idea.get("hook", "")))
+            ep_angle = html_lib.escape(str(idea.get("tylers_angle", "")))
+            
+            idea_html = f'''<div style="background-color: #1a2332; border: 2px solid {border_color}; border-radius: 16px; padding: 20px; margin: 16px 0;">
+<div style="font-size: 11px; color: {border_color}; font-weight: bold; margin-bottom: 6px;">{rank_label} — EPISODE IDEA #{episode_num}</div>
+<div style="font-size: 20px; font-weight: bold; color: #e7e9ea; margin-bottom: 12px;">🎙️ {ep_title}</div>
+<div style="margin-bottom: 12px;">
+<div style="font-size: 11px; color: #1d9bf0; font-weight: bold; margin-bottom: 4px;">THE HOOK</div>
+<div style="font-size: 14px; color: #e7e9ea; line-height: 1.5;">{ep_hook}</div>
+</div>
+<div style="margin-bottom: 12px;">
+<div style="font-size: 11px; color: #1d9bf0; font-weight: bold; margin-bottom: 4px;">TYLER'S ANGLE</div>
+<div style="font-size: 14px; color: #e7e9ea; line-height: 1.5;">{ep_angle}</div>
+</div>
+</div>'''
+            st.markdown(idea_html, unsafe_allow_html=True)
             
             # Segments and spicy take in expandable section
             with st.expander(f"📋 Segments & Spicy Take — Episode #{episode_num}", expanded=False):
@@ -1755,12 +1737,12 @@ else:
                 
                 spicy = idea.get("spicy_take", "")
                 if spicy:
-                    st.markdown(f'''
-                        <div style="background-color: #2d1a1a; border-left: 3px solid #f91880; padding: 12px; margin-top: 12px; border-radius: 8px;">
-                            <div style="font-size: 11px; color: #f91880; font-weight: bold; margin-bottom: 4px;">🌶️ SPICY TAKE — Lead with this for clips</div>
-                            <div style="font-size: 15px; color: #e7e9ea; font-style: italic;">"{spicy}"</div>
-                        </div>
-                    ''', unsafe_allow_html=True)
+                    spicy_escaped = html_lib.escape(str(spicy))
+                    spicy_html = f'''<div style="background-color: #2d1a1a; border-left: 3px solid #f91880; padding: 12px; margin-top: 12px; border-radius: 8px;">
+<div style="font-size: 11px; color: #f91880; font-weight: bold; margin-bottom: 4px;">🌶️ SPICY TAKE — Lead with this for clips</div>
+<div style="font-size: 15px; color: #e7e9ea; font-style: italic;">&ldquo;{spicy_escaped}&rdquo;</div>
+</div>'''
+                    st.markdown(spicy_html, unsafe_allow_html=True)
                 
                 # Copy button for the spicy take
                 if spicy:
@@ -1822,18 +1804,9 @@ if 'my_tweets' in st.session_state and st.session_state.my_tweets:
         with st.expander("📈 What Topics Hit Hardest?", expanded=True):
             for subj, data in sorted_subjects[:6]:
                 avg = data['total_eng'] / data['count'] if data['count'] > 0 else 0
-                st.markdown(f'''
-                    <div style="display: flex; justify-content: space-between; align-items: center; background-color: #16181c; border-radius: 8px; padding: 10px 14px; margin-bottom: 6px;">
-                        <div>
-                            <strong style="color: #e7e9ea;">{subj}</strong>
-                            <span style="color: #536471; font-size: 11px; margin-left: 8px;">{data['count']} tweets</span>
-                        </div>
-                        <div style="font-size: 13px;">
-                            <span style="color: #1d9bf0; font-weight: bold;">{avg:.0f} avg eng</span>
-                            <span style="color: #536471; margin-left: 8px;">({data['total_eng']:,} total)</span>
-                        </div>
-                    </div>
-                ''', unsafe_allow_html=True)
+                subj_esc = html_lib.escape(str(subj))
+                subj_html = f'<div style="display: flex; justify-content: space-between; align-items: center; background-color: #16181c; border-radius: 8px; padding: 10px 14px; margin-bottom: 6px;"><div><strong style="color: #e7e9ea;">{subj_esc}</strong><span style="color: #536471; font-size: 11px; margin-left: 8px;">{data["count"]} tweets</span></div><div style="font-size: 13px;"><span style="color: #1d9bf0; font-weight: bold;">{avg:.0f} avg eng</span><span style="color: #536471; margin-left: 8px;">({data["total_eng"]:,} total)</span></div></div>'
+                st.markdown(subj_html, unsafe_allow_html=True)
     
     # Individual tweets ranked
     with st.expander(f"🏆 Your Top {len(my_tweets)} Recent Tweets (Ranked)", expanded=False):
@@ -1864,27 +1837,9 @@ if 'my_tweets' in st.session_state and st.session_state.my_tweets:
             else:
                 time_str = str(created)[:16]
             
-            st.markdown(f'''
-                <div style="background-color: #16181c; border: 1px solid #2f3336; border-radius: 10px; padding: 12px; margin-bottom: 8px;">
-                    <div style="display: flex; justify-content: space-between; align-items: flex-start;">
-                        <div style="flex: 1;">
-                            <span style="font-size: 14px; margin-right: 8px;">{rank_icon}</span>
-                            <span style="font-size: 13px; color: #e7e9ea;">{t["text"][:120]}{"..." if len(t["text"]) > 120 else ""}</span>
-                        </div>
-                        <div style="flex-shrink: 0; margin-left: 12px; text-align: right;">
-                            <div style="font-size: 18px; font-weight: bold; color: {eng_color};">{t["total_engagement"]:,}</div>
-                            <div style="font-size: 10px; color: #536471;">total eng</div>
-                        </div>
-                    </div>
-                    <div style="display: flex; gap: 16px; font-size: 12px; color: #71767b; margin-top: 8px;">
-                        <span>💬 {t["replies"]}</span>
-                        <span>🔄 {t["retweets"]}</span>
-                        <span>❤️ {t["likes"]}</span>
-                        <span style="color: #536471;">{time_str}</span>
-                        <a href="{tweet_url}" target="_blank" style="color: #1d9bf0; text-decoration: none;">View →</a>
-                    </div>
-                </div>
-            ''', unsafe_allow_html=True)
+            tweet_text_esc = html_lib.escape(str(t["text"][:120])) + ("..." if len(t["text"]) > 120 else "")
+            ranked_html = f'<div style="background-color: #16181c; border: 1px solid #2f3336; border-radius: 10px; padding: 12px; margin-bottom: 8px;"><div style="display: flex; justify-content: space-between; align-items: flex-start;"><div style="flex: 1;"><span style="font-size: 14px; margin-right: 8px;">{rank_icon}</span><span style="font-size: 13px; color: #e7e9ea;">{tweet_text_esc}</span></div><div style="flex-shrink: 0; margin-left: 12px; text-align: right;"><div style="font-size: 18px; font-weight: bold; color: {eng_color};">{t["total_engagement"]:,}</div><div style="font-size: 10px; color: #536471;">total eng</div></div></div><div style="display: flex; gap: 16px; font-size: 12px; color: #71767b; margin-top: 8px;"><span>💬 {t["replies"]}</span><span>🔄 {t["retweets"]}</span><span>❤️ {t["likes"]}</span><span style="color: #536471;">{time_str}</span><a href="{tweet_url}" target="_blank" style="color: #1d9bf0; text-decoration: none;">View →</a></div></div>'
+            st.markdown(ranked_html, unsafe_allow_html=True)
 
 # ========================================
 # 🎯 REPLY TARGET FINDER
@@ -1916,7 +1871,7 @@ if 'reply_targets' in st.session_state:
         
         for t_idx, target in enumerate(targets):
             tweet_url = f"https://twitter.com/{target['author']}/status/{target['id']}"
-            reply_url = f"https://twitter.com/intent/tweet?in_reply_to={target['id']}"
+            reply_url = tweet_url
             
             # Format follower count
             followers = target['followers']
@@ -1940,28 +1895,11 @@ if 'reply_targets' in st.session_state:
             
             verified_badge = " ✅" if target.get('verified') else ""
             
-            st.markdown(f'''
-                <div style="background-color: #16181c; border: 1px solid {opp_color}; border-radius: 12px; padding: 16px; margin-bottom: 10px;">
-                    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
-                        <div>
-                            <span style="font-size: 10px; color: {opp_color}; font-weight: bold;">{opp_label}</span><br>
-                            <strong style="color: #e7e9ea; font-size: 15px;">{target['author_name']}{verified_badge}</strong>
-                            <span style="color: #71767b;"> @{target['author']}</span>
-                            <span style="background-color: #2f3336; color: #e7e9ea; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: bold; margin-left: 8px;">👥 {follower_str}</span>
-                        </div>
-                    </div>
-                    <div style="font-size: 14px; color: #e7e9ea; line-height: 1.4; margin-bottom: 10px;">{target['text'][:200]}{"..." if len(target['text']) > 200 else ""}</div>
-                    <div style="display: flex; gap: 16px; font-size: 12px; color: #71767b; margin-bottom: 10px;">
-                        <span>💬 {target['replies']}</span>
-                        <span>🔄 {target['retweets']}</span>
-                        <span>❤️ {target['likes']}</span>
-                    </div>
-                    <div style="display: flex; gap: 10px;">
-                        <a href="{tweet_url}" target="_blank" style="color: #1d9bf0; text-decoration: none; font-size: 13px;">🔗 View Tweet</a>
-                        <a href="{reply_url}" target="_blank" style="background-color: #1d9bf0; color: white; padding: 4px 14px; border-radius: 16px; text-decoration: none; font-size: 13px; font-weight: bold;">💬 Reply Now →</a>
-                    </div>
-                </div>
-            ''', unsafe_allow_html=True)
+            target_name_esc = html_lib.escape(str(target['author_name']))
+            target_text_esc = html_lib.escape(str(target['text'][:200])) + ("..." if len(target['text']) > 200 else "")
+            
+            target_html = f'<div style="background-color: #16181c; border: 1px solid {opp_color}; border-radius: 12px; padding: 16px; margin-bottom: 10px;"><div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;"><div><span style="font-size: 10px; color: {opp_color}; font-weight: bold;">{opp_label}</span><br><strong style="color: #e7e9ea; font-size: 15px;">{target_name_esc}{verified_badge}</strong><span style="color: #71767b;"> @{target["author"]}</span><span style="background-color: #2f3336; color: #e7e9ea; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: bold; margin-left: 8px;">👥 {follower_str}</span></div></div><div style="font-size: 14px; color: #e7e9ea; line-height: 1.4; margin-bottom: 10px;">{target_text_esc}</div><div style="display: flex; gap: 16px; font-size: 12px; color: #71767b; margin-bottom: 10px;"><span>💬 {target["replies"]}</span><span>🔄 {target["retweets"]}</span><span>❤️ {target["likes"]}</span></div><div style="display: flex; gap: 10px;"><a href="{tweet_url}" target="_blank" style="color: #1d9bf0; text-decoration: none; font-size: 13px;">🔗 View Tweet</a><a href="{reply_url}" target="_blank" style="background-color: #1d9bf0; color: white; padding: 4px 14px; border-radius: 16px; text-decoration: none; font-size: 13px; font-weight: bold;">💬 Reply Now →</a></div></div>'
+            st.markdown(target_html, unsafe_allow_html=True)
             
             # Generate a quick reply suggestion
             reply_gen_key = f"reply_suggestion_{t_idx}"
