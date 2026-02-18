@@ -339,13 +339,15 @@ def search_viral_tweets(keywords, hours=36, debate_mode=False):
             max_results=MAX_TWEETS,
             start_time=start_time,
             sort_order='relevancy',  # CRITICAL: Get best tweets
-            tweet_fields=['public_metrics', 'created_at', 'referenced_tweets'],
-            expansions=['author_id'],
-            user_fields=['username', 'name']
+            tweet_fields=['public_metrics', 'created_at', 'referenced_tweets', 'attachments'],
+            expansions=['author_id', 'attachments.media_keys'],
+            user_fields=['username', 'name'],
+            media_fields=['url', 'preview_image_url', 'type']
         )
         return tweets
     except Exception as e:
-        st.error(f"Search error: {str(e)}")
+        # Don't call st.error from threads - return None and handle in main thread
+        print(f"Search error: {str(e)}")
         return None
 
 def get_top_debate_tweets(exclude_ids=None):
@@ -354,15 +356,27 @@ def get_top_debate_tweets(exclude_ids=None):
     if exclude_ids is None:
         exclude_ids = set()
     
-    # Run 4 searches SEQUENTIALLY (back to working version)
-    broncos_normal = search_viral_tweets(BRONCOS_KEYWORDS, debate_mode=False)
-    broncos_debate = search_viral_tweets(BRONCOS_KEYWORDS, debate_mode=True)
-    nuggets_normal = search_viral_tweets(NUGGETS_KEYWORDS, debate_mode=False)
-    nuggets_debate = search_viral_tweets(NUGGETS_KEYWORDS, debate_mode=True)
+    # Run 4 searches IN PARALLEL — ~4x faster than sequential!
+    search_tasks = [
+        (BRONCOS_KEYWORDS, False),
+        (BRONCOS_KEYWORDS, True),
+        (NUGGETS_KEYWORDS, False),
+        (NUGGETS_KEYWORDS, True),
+    ]
+    
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = [
+            executor.submit(search_viral_tweets, kw, HOURS_BACK, dm)
+            for kw, dm in search_tasks
+        ]
+        broncos_normal, broncos_debate, nuggets_normal, nuggets_debate = [
+            f.result() for f in futures
+        ]
     
     all_tweets = []
     seen_ids = set()
     all_users = {}
+    all_media = {}  # media_key -> media object
     
     # Debug counters
     stats = {
@@ -385,6 +399,11 @@ def get_top_debate_tweets(exclude_ids=None):
         if hasattr(tweets_obj, 'includes') and tweets_obj.includes and 'users' in tweets_obj.includes:
             for user in tweets_obj.includes['users']:
                 all_users[user.id] = user
+        
+        # Collect media
+        if hasattr(tweets_obj, 'includes') and tweets_obj.includes and 'media' in tweets_obj.includes:
+            for media in tweets_obj.includes['media']:
+                all_media[media.media_key] = media
         
         # Process tweets
         for tweet in tweets_obj.data:
@@ -425,6 +444,13 @@ def get_top_debate_tweets(exclude_ids=None):
             
             user = all_users.get(tweet.author_id)
             
+            # Attach media from the initial search (avoids per-tweet API calls)
+            tweet_media = []
+            if hasattr(tweet, 'attachments') and tweet.attachments and 'media_keys' in tweet.attachments:
+                for mk in tweet.attachments['media_keys']:
+                    if mk in all_media:
+                        tweet_media.append(all_media[mk])
+            
             all_tweets.append({
                 'id': tweet.id,
                 'text': tweet.text,
@@ -436,7 +462,8 @@ def get_top_debate_tweets(exclude_ids=None):
                 'replies': metrics['reply_count'],
                 'debate_score': score,
                 'priority': priority_info,
-                'subjects': subjects  # Store subjects for diversity
+                'subjects': subjects,  # Store subjects for diversity
+                'media': tweet_media   # Pre-fetched media
             })
             
             seen_ids.add(tweet.id)
@@ -581,7 +608,8 @@ def display_tweet_card(tweet, is_top_pick=False, pick_number=None):
         
         st.markdown(f'<div style="font-size: 15px; line-height: 20px; color: #e7e9ea; margin-bottom: 12px;">{tweet["text"]}</div>', unsafe_allow_html=True)
         
-        media = fetch_tweet_media(tweet['id'])
+        # Use pre-fetched media (no extra API calls!)
+        media = tweet.get('media', [])
         if media:
             for m in media:
                 try:
@@ -606,19 +634,25 @@ def display_tweet_card(tweet, is_top_pick=False, pick_number=None):
 def generate_rewrites(original_tweet):
     """Generate all 4 rewrite styles at once using Sonnet"""
     
-    prompt = f'''Rewrite this viral Broncos tweet in 4 different styles for Tyler Polumbus (former Broncos player, radio host):
+    prompt = f'''You are writing tweets for Tyler Polumbus — former Denver Broncos offensive lineman (Super Bowl 50 champion), current radio host on Altitude 92.5, and host of the "Mount Polumbus Speaks" podcast. He played 8 NFL seasons as an undrafted free agent and started over 60 games.
 
 Original tweet:
 {original_tweet}
 
-Generate 4 versions:
-1. DEFAULT: Clean, informative, sports radio voice
-2. ANALYTICAL: Stats-focused, film breakdown style
-3. CONTROVERSIAL: Spicy hot take that drives engagement
-4. PERSONAL: First-person from Tyler's NFL experience
+Generate 4 tweet versions:
+
+1. DEFAULT: Clean, informative take in Tyler's sports radio voice. Confident but balanced.
+
+2. CONTROVERSIAL: Spicy hot take designed to drive maximum engagement and debate. Bold, unapologetic.
+
+3. RETWEET: This will be used as a quote tweet. Add genuine value on top of the original — provide insider context, a layer of analysis, a connection most fans wouldn't make, or a strong opinion that elevates the conversation. Do NOT just rephrase the original. Think "what does Tyler uniquely bring to this that nobody else can?"
+
+4. REPLY: This will be posted as a direct reply to the original tweet. Either add meaningful context/layers that deepen the discussion, or give Tyler's clear opinion in response. Should feel like a natural reply in a conversation thread — direct, punchy, and engaging. Can agree, disagree, or build on the original.
+
+All versions should be tweet-length (under 280 characters). Sound like a real person, not a bot.
 
 Return ONLY valid JSON:
-{{"Default": "...", "Analytical": "...", "Controversial": "...", "Personal": "..."}}'''
+{{"Default": "...", "Controversial": "...", "Retweet": "...", "Reply": "..."}}'''
     
     try:
         message = client.messages.create(
@@ -636,9 +670,9 @@ Return ONLY valid JSON:
     except Exception as e:
         return {
             "Default": f"ERROR: {str(e)}",
-            "Analytical": f"ERROR: {str(e)}",
             "Controversial": f"ERROR: {str(e)}",
-            "Personal": f"ERROR: {str(e)}"
+            "Retweet": f"ERROR: {str(e)}",
+            "Reply": f"ERROR: {str(e)}"
         }
 
 # Button section
@@ -745,7 +779,7 @@ if st.session_state.current_broncos_tweets or st.session_state.current_nuggets_t
                     col1, col2 = st.columns(2)
                     
                     with col1:
-                        st.markdown("**Default:**")
+                        st.markdown("**📝 Default:**")
                         edited_default = st.text_area(
                             "Default",
                             value=rewrites['Default'],
@@ -756,19 +790,19 @@ if st.session_state.current_broncos_tweets or st.session_state.current_nuggets_t
                         if st.button("📋 Copy Default", key=f"copy_default_top{i}", use_container_width=True):
                             st.code(edited_default, language=None)
                         
-                        st.markdown("**Analytical:**")
-                        edited_analytical = st.text_area(
-                            "Analytical",
-                            value=rewrites['Analytical'],
+                        st.markdown("**🔄 Retweet (Quote Tweet):**")
+                        edited_retweet = st.text_area(
+                            "Retweet",
+                            value=rewrites['Retweet'],
                             height=100,
-                            key=f"edit_analytical_top{i}",
+                            key=f"edit_retweet_top{i}",
                             label_visibility="collapsed"
                         )
-                        if st.button("📋 Copy Analytical", key=f"copy_analytical_top{i}", use_container_width=True):
-                            st.code(edited_analytical, language=None)
+                        if st.button("📋 Copy Retweet", key=f"copy_retweet_top{i}", use_container_width=True):
+                            st.code(edited_retweet, language=None)
                     
                     with col2:
-                        st.markdown("**Controversial:**")
+                        st.markdown("**🔥 Controversial:**")
                         edited_controversial = st.text_area(
                             "Controversial",
                             value=rewrites['Controversial'],
@@ -779,16 +813,16 @@ if st.session_state.current_broncos_tweets or st.session_state.current_nuggets_t
                         if st.button("📋 Copy Controversial", key=f"copy_controversial_top{i}", use_container_width=True):
                             st.code(edited_controversial, language=None)
                         
-                        st.markdown("**Personal:**")
-                        edited_personal = st.text_area(
-                            "Personal",
-                            value=rewrites['Personal'],
+                        st.markdown("**💬 Reply:**")
+                        edited_reply = st.text_area(
+                            "Reply",
+                            value=rewrites['Reply'],
                             height=100,
-                            key=f"edit_personal_top{i}",
+                            key=f"edit_reply_top{i}",
                             label_visibility="collapsed"
                         )
-                        if st.button("📋 Copy Personal", key=f"copy_personal_top{i}", use_container_width=True):
-                            st.code(edited_personal, language=None)
+                        if st.button("📋 Copy Reply", key=f"copy_reply_top{i}", use_container_width=True):
+                            st.code(edited_reply, language=None)
                 
                 st.markdown("---")
         
@@ -814,7 +848,7 @@ if st.session_state.current_broncos_tweets or st.session_state.current_nuggets_t
                     col1, col2 = st.columns(2)
                     
                     with col1:
-                        st.markdown("**Default:**")
+                        st.markdown("**📝 Default:**")
                         edited_default = st.text_area(
                             "Default",
                             value=rewrites['Default'],
@@ -825,19 +859,19 @@ if st.session_state.current_broncos_tweets or st.session_state.current_nuggets_t
                         if st.button("📋 Copy Default", key=f"copy_default_b{idx}", use_container_width=True):
                             st.code(edited_default, language=None)
                         
-                        st.markdown("**Analytical:**")
-                        edited_analytical = st.text_area(
-                            "Analytical",
-                            value=rewrites['Analytical'],
+                        st.markdown("**🔄 Retweet (Quote Tweet):**")
+                        edited_retweet = st.text_area(
+                            "Retweet",
+                            value=rewrites['Retweet'],
                             height=100,
-                            key=f"edit_analytical_b{idx}",
+                            key=f"edit_retweet_b{idx}",
                             label_visibility="collapsed"
                         )
-                        if st.button("📋 Copy Analytical", key=f"copy_analytical_b{idx}", use_container_width=True):
-                            st.code(edited_analytical, language=None)
+                        if st.button("📋 Copy Retweet", key=f"copy_retweet_b{idx}", use_container_width=True):
+                            st.code(edited_retweet, language=None)
                     
                     with col2:
-                        st.markdown("**Controversial:**")
+                        st.markdown("**🔥 Controversial:**")
                         edited_controversial = st.text_area(
                             "Controversial",
                             value=rewrites['Controversial'],
@@ -848,16 +882,16 @@ if st.session_state.current_broncos_tweets or st.session_state.current_nuggets_t
                         if st.button("📋 Copy Controversial", key=f"copy_controversial_b{idx}", use_container_width=True):
                             st.code(edited_controversial, language=None)
                         
-                        st.markdown("**Personal:**")
-                        edited_personal = st.text_area(
-                            "Personal",
-                            value=rewrites['Personal'],
+                        st.markdown("**💬 Reply:**")
+                        edited_reply = st.text_area(
+                            "Reply",
+                            value=rewrites['Reply'],
                             height=100,
-                            key=f"edit_personal_b{idx}",
+                            key=f"edit_reply_b{idx}",
                             label_visibility="collapsed"
                         )
-                        if st.button("📋 Copy Personal", key=f"copy_personal_b{idx}", use_container_width=True):
-                            st.code(edited_personal, language=None)
+                        if st.button("📋 Copy Reply", key=f"copy_reply_b{idx}", use_container_width=True):
+                            st.code(edited_reply, language=None)
                 
                 st.markdown("---")
     
@@ -883,7 +917,7 @@ if st.session_state.current_broncos_tweets or st.session_state.current_nuggets_t
                 col1, col2 = st.columns(2)
                 
                 with col1:
-                    st.markdown("**Default:**")
+                    st.markdown("**📝 Default:**")
                     edited_default = st.text_area(
                         "Default",
                         value=rewrites['Default'],
@@ -894,19 +928,19 @@ if st.session_state.current_broncos_tweets or st.session_state.current_nuggets_t
                     if st.button("📋 Copy Default", key=f"copy_default_n{idx}", use_container_width=True):
                         st.code(edited_default, language=None)
                     
-                    st.markdown("**Analytical:**")
-                    edited_analytical = st.text_area(
-                        "Analytical",
-                        value=rewrites['Analytical'],
+                    st.markdown("**🔄 Retweet (Quote Tweet):**")
+                    edited_retweet = st.text_area(
+                        "Retweet",
+                        value=rewrites['Retweet'],
                         height=100,
-                        key=f"edit_analytical_n{idx}",
+                        key=f"edit_retweet_n{idx}",
                         label_visibility="collapsed"
                     )
-                    if st.button("📋 Copy Analytical", key=f"copy_analytical_n{idx}", use_container_width=True):
-                        st.code(edited_analytical, language=None)
+                    if st.button("📋 Copy Retweet", key=f"copy_retweet_n{idx}", use_container_width=True):
+                        st.code(edited_retweet, language=None)
                 
                 with col2:
-                    st.markdown("**Controversial:**")
+                    st.markdown("**🔥 Controversial:**")
                     edited_controversial = st.text_area(
                         "Controversial",
                         value=rewrites['Controversial'],
@@ -917,16 +951,16 @@ if st.session_state.current_broncos_tweets or st.session_state.current_nuggets_t
                     if st.button("📋 Copy Controversial", key=f"copy_controversial_n{idx}", use_container_width=True):
                         st.code(edited_controversial, language=None)
                     
-                    st.markdown("**Personal:**")
-                    edited_personal = st.text_area(
-                        "Personal",
-                        value=rewrites['Personal'],
+                    st.markdown("**💬 Reply:**")
+                    edited_reply = st.text_area(
+                        "Reply",
+                        value=rewrites['Reply'],
                         height=100,
-                        key=f"edit_personal_n{idx}",
+                        key=f"edit_reply_n{idx}",
                         label_visibility="collapsed"
                     )
-                    if st.button("📋 Copy Personal", key=f"copy_personal_n{idx}", use_container_width=True):
-                        st.code(edited_personal, language=None)
+                    if st.button("📋 Copy Reply", key=f"copy_reply_n{idx}", use_container_width=True):
+                        st.code(edited_reply, language=None)
             
             st.markdown("---")
 else:
