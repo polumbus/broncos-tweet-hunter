@@ -595,9 +595,9 @@ def display_tweet_card(tweet, is_top_pick=False, pick_number=None):
         st.markdown(f'<a href="{tweet_url}" target="_blank" style="color: #1d9bf0; text-decoration: none;">🔗 View on Twitter →</a>', unsafe_allow_html=True)
 
 def generate_rewrites(original_tweet):
-    """Generate all 4 rewrite styles at once with prompt caching"""
+    """Generate all 4 rewrite styles using Haiku 3.5 with prompt caching"""
     
-    # SYSTEM PROMPT with caching - speeds up calls 2 and 3!
+    # SYSTEM PROMPT with caching for speed
     system_prompt = [
         {
             "type": "text",
@@ -613,7 +613,7 @@ def generate_rewrites(original_tweet):
 
 Return ONLY valid JSON:
 {"Default": "...", "Analytical": "...", "Controversial": "...", "Personal": "..."}""",
-            "cache_control": {"type": "ephemeral"}  # Cache this!
+            "cache_control": {"type": "ephemeral"}
         }
     ]
     
@@ -621,20 +621,27 @@ Return ONLY valid JSON:
     
     try:
         message = client.messages.create(
-            model="claude-3-5-haiku-20241022",  # Haiku 3.5 - 3x faster than Sonnet!
+            model="claude-3-5-haiku-20241022",  # Haiku 3.5 (correct model name)
             max_tokens=800,
             system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}]
         )
         
         response_text = message.content[0].text
-        clean_response = response_text.replace('```json', '').replace('```', '').strip()
+        
+        # Clean markdown if present
+        clean_response = response_text.strip()
+        if clean_response.startswith('```'):
+            clean_response = clean_response.split('\n', 1)[1] if '\n' in clean_response else clean_response[3:]
+        if clean_response.endswith('```'):
+            clean_response = clean_response.rsplit('\n', 1)[0] if '\n' in clean_response else clean_response[:-3]
+        clean_response = clean_response.strip()
         
         import json
         rewrites = json.loads(clean_response)
         return rewrites
+        
     except Exception as e:
-        # Fallback if JSON parsing fails
         return {
             "Default": f"ERROR: {str(e)}",
             "Analytical": f"ERROR: {str(e)}",
