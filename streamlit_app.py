@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
+from urllib.parse import quote_plus
 
 # ========================================
 # PRODUCTION MODE
@@ -15,6 +16,7 @@ TESTING_MODE = False
 MAX_TWEETS = 100
 HOURS_BACK = 36
 SCAN_HISTORY_FILE = Path("scan_history.json")
+TYLER_USERNAME = "tyler_polumbus"  # For tweet performance tracker
 # ========================================
 
 st.set_page_config(page_title="Broncos Tweet Hunter", layout="wide", initial_sidebar_state="collapsed")
@@ -682,6 +684,281 @@ Return ONLY valid JSON:
         }
 
 # ========================================
+# 🧵 THREAD BUILDER
+# ========================================
+
+def generate_thread(original_tweet, subject=""):
+    """Generate a 4-5 tweet thread building on the original tweet"""
+    
+    prompt = f'''You are Tyler Polumbus — former Denver Broncos offensive lineman (Super Bowl 50 champion, 8 NFL seasons, undrafted free agent who started 60+ games), current radio host on Altitude 92.5 (12-3 PM MST), and host of the "Mount Polumbus Speaks" podcast.
+
+You just saw this viral tweet and want to build a full thread giving your take:
+
+Original tweet:
+{original_tweet}
+
+Generate a 4-5 tweet thread (each tweet under 280 characters). The thread should:
+
+- Tweet 1: Strong hook that grabs attention — a bold statement or question that makes people stop scrolling
+- Tweet 2: Your unique insider take — something only a guy who played in the NFL and was in that locker room would know
+- Tweet 3: Evidence or context — back up your take with a specific observation, comparison, or reference
+- Tweet 4: The counter-argument acknowledged — show you've thought about the other side, then explain why you still hold your position
+- Tweet 5 (optional): The closer — a punchy one-liner that's clip-worthy and shareable
+
+Rules:
+- Sound like a real person, not an AI. Use natural language.
+- Be opinionated. Don't hedge everything.
+- Each tweet should stand on its own but flow as a thread
+- No hashtags in the thread (they look forced)
+- Number the tweets 1/ 2/ 3/ etc.
+
+Return valid JSON array of strings:
+["1/ tweet one text...", "2/ tweet two text...", "3/ tweet three text...", "4/ tweet four text...", "5/ tweet five text..."]'''
+    
+    try:
+        message = client.messages.create(
+            model="claude-sonnet-4-5-20250929",
+            max_tokens=1500,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        
+        response_text = message.content[0].text
+        clean_response = response_text.replace('```json', '').replace('```', '').strip()
+        return json.loads(clean_response)
+    except Exception as e:
+        return [f"ERROR: {str(e)}"]
+
+def display_thread(thread_tweets, key_prefix):
+    """Display a generated thread with editable text areas and copy buttons"""
+    st.markdown(f'''
+        <div style="background-color: #16181c; border: 1px solid #1d9bf0; border-radius: 12px; padding: 16px; margin: 8px 0;">
+            <div style="font-size: 13px; color: #1d9bf0; font-weight: bold; margin-bottom: 10px;">🧵 THREAD ({len(thread_tweets)} tweets)</div>
+        </div>
+    ''', unsafe_allow_html=True)
+    
+    for j, tweet_text in enumerate(thread_tweets):
+        edited = st.text_area(
+            f"Tweet {j+1}",
+            value=tweet_text,
+            height=80,
+            key=f"{key_prefix}_thread_{j}",
+            label_visibility="collapsed"
+        )
+        if st.button(f"📋 Copy Tweet {j+1}", key=f"{key_prefix}_copy_thread_{j}", use_container_width=True):
+            st.code(edited, language=None)
+    
+    # Copy full thread
+    full_thread_key = f"{key_prefix}_full_thread"
+    if st.button("📋 Copy Full Thread", key=full_thread_key, use_container_width=True, type="primary"):
+        all_tweets = []
+        for j in range(len(thread_tweets)):
+            widget_key = f"{key_prefix}_thread_{j}"
+            all_tweets.append(st.session_state.get(widget_key, thread_tweets[j]))
+        st.code("\n\n".join(all_tweets), language=None)
+
+# ========================================
+# 📋 SHOW PREP NOTES
+# ========================================
+
+def generate_show_prep(trending_topics):
+    """Generate radio-ready show prep talking points from trending topics"""
+    
+    # Build topic summary
+    topic_summary = ""
+    for i, topic in enumerate(trending_topics[:6], 1):
+        topic_summary += f"\n{i}. {topic['subject']} — {topic['total_replies']} replies, {topic['total_retweets']} RTs, {topic['total_likes']} likes ({topic['tweet_count']} tweets)"
+        if topic.get('top_tweet'):
+            topic_summary += f"\n   Hottest take: \"{topic['top_tweet']}\""
+    
+    prompt = f'''You are a show prep producer for Tyler Polumbus's radio show on Altitude 92.5 (12-3 PM MST). Tyler is a former Denver Broncos offensive lineman (Super Bowl 50 champion, 8 NFL seasons as an undrafted free agent, started 60+ games) who now hosts a daily sports radio show.
+
+Here are today's trending topics from Denver sports Twitter:
+{topic_summary}
+
+Generate show prep notes Tyler can use on air TODAY. For each of the top 3-4 topics:
+
+1. **TOPIC**: The subject
+2. **OPEN WITH** (1 sentence): How Tyler should introduce this topic to listeners. Conversational, like you're talking to a friend at a bar.
+3. **KEY FACTS** (2-3 bullets): The specific things Tyler needs to know — stats, quotes, context
+4. **TYLER'S TAKE** (1-2 sentences): What Tyler's opinion should be, drawing on his playing experience
+5. **CALLER QUESTION**: A question to throw to callers that will light up the phone lines
+6. **TRANSITION**: One sentence to smoothly move to the next topic
+
+Keep it punchy. Tyler reads this during commercial breaks. No fluff.
+
+Return valid JSON array:
+[
+  {{
+    "topic": "...",
+    "open_with": "...",
+    "key_facts": ["...", "...", "..."],
+    "tylers_take": "...",
+    "caller_question": "...",
+    "transition": "..."
+  }}
+]'''
+    
+    try:
+        message = client.messages.create(
+            model="claude-sonnet-4-5-20250929",
+            max_tokens=2000,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        
+        response_text = message.content[0].text
+        clean_response = response_text.replace('```json', '').replace('```', '').strip()
+        return json.loads(clean_response)
+    except Exception as e:
+        return [{"topic": f"ERROR: {str(e)}", "open_with": "", "key_facts": [], "tylers_take": "", "caller_question": "", "transition": ""}]
+
+# ========================================
+# 📊 MY TWEET PERFORMANCE TRACKER
+# ========================================
+
+def get_my_tweet_performance(username=TYLER_USERNAME, count=20):
+    """Fetch Tyler's recent tweets and their engagement metrics"""
+    try:
+        # Get user ID
+        user = client_twitter.get_user(username=username, user_fields=['public_metrics'])
+        if not user or not user.data:
+            return None, None
+        
+        user_data = user.data
+        user_metrics = user_data.public_metrics
+        
+        # Get recent tweets
+        tweets = client_twitter.get_users_tweets(
+            user_data.id,
+            max_results=count,
+            tweet_fields=['public_metrics', 'created_at', 'text'],
+            exclude=['retweets']
+        )
+        
+        if not tweets or not tweets.data:
+            return user_metrics, []
+        
+        tweet_list = []
+        for tweet in tweets.data:
+            m = tweet.public_metrics
+            total_engagement = m['reply_count'] + m['retweet_count'] + m['like_count']
+            
+            # Detect subjects
+            subjects = extract_subjects(tweet.text)
+            
+            tweet_list.append({
+                'id': tweet.id,
+                'text': tweet.text,
+                'created_at': tweet.created_at,
+                'replies': m['reply_count'],
+                'retweets': m['retweet_count'],
+                'likes': m['like_count'],
+                'impressions': m.get('impression_count', 0),
+                'total_engagement': total_engagement,
+                'subjects': subjects
+            })
+        
+        # Sort by total engagement
+        tweet_list.sort(key=lambda x: x['total_engagement'], reverse=True)
+        
+        return user_metrics, tweet_list
+    except Exception as e:
+        print(f"Tweet performance error: {e}")
+        return None, None
+
+# ========================================
+# 🎯 REPLY TARGET FINDER
+# ========================================
+
+def find_reply_targets(min_followers=25000):
+    """Find high-follower accounts tweeting about Broncos/Nuggets — prime reply opportunities"""
+    
+    # Search for Broncos and Nuggets tweets from larger accounts
+    query_broncos = "(Denver Broncos OR Bo Nix OR Sean Payton OR #BroncosCountry) -is:retweet lang:en"
+    query_nuggets = "(Denver Nuggets OR Jokic OR Nuggets NBA) -is:retweet lang:en"
+    
+    start_time = datetime.utcnow() - timedelta(hours=24)
+    
+    all_targets = []
+    seen_ids = set()
+    
+    def search_targets(query):
+        try:
+            result = client_twitter.search_recent_tweets(
+                query=query,
+                max_results=50,
+                start_time=start_time,
+                sort_order='relevancy',
+                tweet_fields=['public_metrics', 'created_at'],
+                expansions=['author_id'],
+                user_fields=['username', 'name', 'public_metrics', 'verified']
+            )
+            return result
+        except Exception as e:
+            print(f"Reply target search error: {e}")
+            return None
+    
+    # Search both in parallel
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [
+            executor.submit(search_targets, query_broncos),
+            executor.submit(search_targets, query_nuggets)
+        ]
+        results = [f.result() for f in futures]
+    
+    for result in results:
+        if not result or not result.data:
+            continue
+        
+        # Build user map
+        users = {}
+        if hasattr(result, 'includes') and result.includes and 'users' in result.includes:
+            for u in result.includes['users']:
+                users[u.id] = u
+        
+        for tweet in result.data:
+            if tweet.id in seen_ids:
+                continue
+            seen_ids.add(tweet.id)
+            
+            user = users.get(tweet.author_id)
+            if not user or not hasattr(user, 'public_metrics'):
+                continue
+            
+            followers = user.public_metrics.get('followers_count', 0)
+            if followers < min_followers:
+                continue
+            
+            # Skip Tyler's own tweets
+            if user.username.lower() == TYLER_USERNAME.lower():
+                continue
+            
+            m = tweet.public_metrics
+            tweet_engagement = m['reply_count'] + m['retweet_count'] + m['like_count']
+            
+            # Opportunity score: high follower + high engagement = best reply target
+            opportunity_score = (followers * 0.3) + (tweet_engagement * 100)
+            
+            all_targets.append({
+                'id': tweet.id,
+                'text': tweet.text,
+                'author': user.username,
+                'author_name': user.name,
+                'followers': followers,
+                'verified': getattr(user, 'verified', False),
+                'replies': m['reply_count'],
+                'retweets': m['retweet_count'],
+                'likes': m['like_count'],
+                'tweet_engagement': tweet_engagement,
+                'opportunity_score': opportunity_score,
+                'created_at': tweet.created_at
+            })
+    
+    # Sort by opportunity score
+    all_targets.sort(key=lambda x: x['opportunity_score'], reverse=True)
+    
+    return all_targets[:10]  # Top 10 targets
+
+# ========================================
 # SCAN HISTORY PERSISTENCE
 # ========================================
 
@@ -731,6 +1008,49 @@ def load_scan_history(days=7):
 # ========================================
 # TRENDING TOPICS (Current Scan)
 # ========================================
+
+# Map subject names to smart Twitter search queries
+SUBJECT_SEARCH_QUERIES = {
+    # Broncos Players
+    "Bo Nix": "Bo Nix Broncos",
+    "Patrick Surtain": "Patrick Surtain OR PS2 Broncos",
+    "Courtland Sutton": "Courtland Sutton Broncos",
+    "Javonte Williams": "Javonte Williams Broncos",
+    "Russell Wilson": "Russell Wilson Broncos",
+    "Riley Moss": "Riley Moss Broncos",
+    "Troy Franklin": "Troy Franklin Broncos",
+    # Broncos Coaches
+    "Sean Payton": "Sean Payton Broncos",
+    "Vance Joseph": "Vance Joseph Broncos",
+    "Fire Payton": "fire Payton OR Payton out Broncos",
+    # Broncos Topics
+    "QB Discussion": "Broncos quarterback OR Broncos QB",
+    "Defense": "Broncos defense OR Broncos defensive",
+    "Offense": "Broncos offense OR Broncos offensive",
+    "Draft": "Broncos draft OR Nuggets draft",
+    "Playoffs": "Broncos playoffs OR Nuggets playoffs",
+    "General Broncos": "Denver Broncos",
+    # Nuggets Players
+    "Nikola Jokic": "Jokic Nuggets",
+    "Jamal Murray": "Jamal Murray Nuggets",
+    "Aaron Gordon": "Aaron Gordon Nuggets",
+    "Michael Porter Jr": "Michael Porter Jr OR MPJ Nuggets",
+    # Nuggets Topics
+    "MVP": "Jokic MVP OR Nuggets MVP",
+    "Player Rest": "Nuggets rest OR load management Nuggets",
+    "Championship": "Nuggets championship OR Nuggets title",
+    "General Nuggets": "Denver Nuggets",
+    # Cross-team
+    "Trade Talk": "Broncos trade OR Nuggets trade",
+    "AJ Brown": "AJ Brown Broncos",
+    "Contract": "Broncos contract OR Nuggets contract",
+    "Injury": "Broncos injury OR Nuggets injury",
+}
+
+def get_twitter_search_url(subject):
+    """Build a Twitter search URL for a topic"""
+    query = SUBJECT_SEARCH_QUERIES.get(subject, f"{subject} Broncos OR Nuggets")
+    return f"https://twitter.com/search?q={quote_plus(query)}&src=typed_query&f=top"
 
 def get_trending_topics(broncos_tweets, nuggets_tweets):
     """Aggregate current scan by subject — returns sorted list of topic dicts"""
@@ -961,8 +1281,11 @@ if st.session_state.current_broncos_tweets or st.session_state.current_nuggets_t
                         badge_color = "#536471"  # Gray — others
                         label = "📊"
                     
+                    search_url = get_twitter_search_url(topic["subject"])
+                    
                     st.markdown(f'''
-                        <div style="background-color: #16181c; border: 1px solid {badge_color}; border-radius: 12px; padding: 14px; margin-bottom: 10px;">
+                        <a href="{search_url}" target="_blank" style="text-decoration: none;">
+                        <div style="background-color: #16181c; border: 1px solid {badge_color}; border-radius: 12px; padding: 14px; margin-bottom: 10px; cursor: pointer; transition: background-color 0.2s;" onmouseover="this.style.backgroundColor='#1c2028'" onmouseout="this.style.backgroundColor='#16181c'">
                             <div style="font-size: 11px; color: {badge_color}; font-weight: bold; margin-bottom: 4px;">{label} #{i+1} TRENDING</div>
                             <div style="font-size: 16px; font-weight: bold; color: #e7e9ea; margin-bottom: 8px;">{topic["subject"]}</div>
                             <div style="display: flex; gap: 12px; font-size: 12px; color: #71767b;">
@@ -970,8 +1293,12 @@ if st.session_state.current_broncos_tweets or st.session_state.current_nuggets_t
                                 <span>🔄 {topic["total_retweets"]} RTs</span>
                                 <span>❤️ {topic["total_likes"]}</span>
                             </div>
-                            <div style="font-size: 11px; color: #536471; margin-top: 6px;">{topic["tweet_count"]} tweets found</div>
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 6px;">
+                                <span style="font-size: 11px; color: #536471;">{topic["tweet_count"]} tweets found</span>
+                                <span style="font-size: 11px; color: #1d9bf0;">🔗 Search on 𝕏 →</span>
+                            </div>
                         </div>
+                        </a>
                     ''', unsafe_allow_html=True)
             
             # Engagement bar chart
@@ -981,9 +1308,10 @@ if st.session_state.current_broncos_tweets or st.session_state.current_nuggets_t
                 for topic in trending[:8]:
                     bar_pct = int((topic["total_engagement"] / max_eng) * 100)
                     bar_color = "#1d9bf0" if "Broncos" not in topic["subject"] and "Nuggets" not in topic["subject"] else ("#fb4f14" if "Nix" in topic["subject"] or "Payton" in topic["subject"] or "Broncos" in topic["subject"] else "#ffd700")
+                    bar_search_url = get_twitter_search_url(topic["subject"])
                     st.markdown(f'''
                         <div style="display: flex; align-items: center; margin-bottom: 4px;">
-                            <div style="width: 140px; font-size: 12px; color: #e7e9ea; flex-shrink: 0;">{topic["subject"]}</div>
+                            <a href="{bar_search_url}" target="_blank" style="width: 140px; font-size: 12px; color: #1d9bf0; flex-shrink: 0; text-decoration: none;" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">{topic["subject"]}</a>
                             <div style="flex: 1; background-color: #2f3336; border-radius: 4px; height: 20px; overflow: hidden;">
                                 <div style="width: {bar_pct}%; background-color: {bar_color}; height: 100%; border-radius: 4px; display: flex; align-items: center; padding-left: 8px;">
                                     <span style="font-size: 10px; color: white; font-weight: bold;">{topic["total_engagement"]}</span>
@@ -992,6 +1320,58 @@ if st.session_state.current_broncos_tweets or st.session_state.current_nuggets_t
                         </div>
                     ''', unsafe_allow_html=True)
                 st.markdown("")  # Spacer
+            
+            # Show Prep Notes button
+            st.markdown("")
+            if st.button("📋 Generate Show Prep Notes for Today", key="gen_show_prep", use_container_width=True, type="primary"):
+                with st.spinner("🎙️ Building your show prep..."):
+                    st.session_state.show_prep = generate_show_prep(trending)
+            
+            # Display show prep if generated
+            if 'show_prep' in st.session_state:
+                st.markdown("### 🎙️ TODAY'S SHOW PREP")
+                st.caption("Read during commercial breaks. Each topic = ~5 min segment.")
+                
+                for sp_idx, segment in enumerate(st.session_state.show_prep):
+                    topic_name = segment.get('topic', 'Unknown')
+                    open_with = segment.get('open_with', '')
+                    facts = segment.get('key_facts', [])
+                    take = segment.get('tylers_take', '')
+                    caller_q = segment.get('caller_question', '')
+                    transition = segment.get('transition', '')
+                    
+                    # Segment colors
+                    seg_colors = ["#f91880", "#ff6b35", "#1d9bf0", "#00ba7c"]
+                    seg_color = seg_colors[sp_idx % len(seg_colors)]
+                    
+                    st.markdown(f'''
+                        <div style="background-color: #16181c; border-left: 4px solid {seg_color}; border-radius: 8px; padding: 16px; margin: 12px 0;">
+                            <div style="font-size: 11px; color: {seg_color}; font-weight: bold; margin-bottom: 4px;">SEGMENT {sp_idx + 1}</div>
+                            <div style="font-size: 18px; font-weight: bold; color: #e7e9ea; margin-bottom: 10px;">{topic_name}</div>
+                            
+                            <div style="margin-bottom: 10px;">
+                                <div style="font-size: 11px; color: #1d9bf0; font-weight: bold;">🎤 OPEN WITH:</div>
+                                <div style="font-size: 14px; color: #e7e9ea; line-height: 1.4;">"{open_with}"</div>
+                            </div>
+                            
+                            <div style="margin-bottom: 10px;">
+                                <div style="font-size: 11px; color: #1d9bf0; font-weight: bold;">📌 KEY FACTS:</div>
+                                {"".join(f'<div style="font-size: 13px; color: #c4cad0; margin-left: 8px; line-height: 1.4;">• {fact}</div>' for fact in facts)}
+                            </div>
+                            
+                            <div style="margin-bottom: 10px;">
+                                <div style="font-size: 11px; color: #1d9bf0; font-weight: bold;">💪 TYLER'S TAKE:</div>
+                                <div style="font-size: 14px; color: #e7e9ea; font-style: italic; line-height: 1.4;">"{take}"</div>
+                            </div>
+                            
+                            <div style="background-color: #1a2332; border-radius: 8px; padding: 10px; margin-bottom: 8px;">
+                                <div style="font-size: 11px; color: #ff6b35; font-weight: bold;">📞 CALLER QUESTION:</div>
+                                <div style="font-size: 14px; color: #e7e9ea;">"{caller_q}"</div>
+                            </div>
+                            
+                            <div style="font-size: 12px; color: #536471; font-style: italic;">➡️ Transition: {transition}</div>
+                        </div>
+                    ''', unsafe_allow_html=True)
     
     st.markdown("---")
     
@@ -1077,6 +1457,17 @@ if st.session_state.current_broncos_tweets or st.session_state.current_nuggets_t
                         if st.button("📋 Copy Reply", key=f"copy_reply_top{i}", use_container_width=True):
                             st.code(edited_reply, language=None)
                 
+                # Thread builder button
+                thread_key = f"thread_top{i}"
+                if thread_key not in st.session_state:
+                    if st.button("🧵 Build Thread from This Tweet", key=f"gen_thread_top{i}", use_container_width=True):
+                        with st.spinner("🧵 Building your thread..."):
+                            st.session_state[thread_key] = generate_thread(tweet['text'])
+                            st.rerun()
+                
+                if thread_key in st.session_state:
+                    display_thread(st.session_state[thread_key], f"top{i}")
+                
                 st.markdown("---")
         
         if len(top_broncos) > 3:
@@ -1146,6 +1537,17 @@ if st.session_state.current_broncos_tweets or st.session_state.current_nuggets_t
                         if st.button("📋 Copy Reply", key=f"copy_reply_b{idx}", use_container_width=True):
                             st.code(edited_reply, language=None)
                 
+                # Thread builder button
+                thread_key = f"thread_b{idx}"
+                if thread_key not in st.session_state:
+                    if st.button("🧵 Build Thread from This Tweet", key=f"gen_thread_b{idx}", use_container_width=True):
+                        with st.spinner("🧵 Building your thread..."):
+                            st.session_state[thread_key] = generate_thread(tweet['text'])
+                            st.rerun()
+                
+                if thread_key in st.session_state:
+                    display_thread(st.session_state[thread_key], f"b{idx}")
+                
                 st.markdown("---")
     
     if top_nuggets:
@@ -1214,6 +1616,17 @@ if st.session_state.current_broncos_tweets or st.session_state.current_nuggets_t
                     )
                     if st.button("📋 Copy Reply", key=f"copy_reply_n{idx}", use_container_width=True):
                         st.code(edited_reply, language=None)
+            
+            # Thread builder button
+            thread_key = f"thread_n{idx}"
+            if thread_key not in st.session_state:
+                if st.button("🧵 Build Thread from This Tweet", key=f"gen_thread_n{idx}", use_container_width=True):
+                    with st.spinner("🧵 Building your thread..."):
+                        st.session_state[thread_key] = generate_thread(tweet['text'])
+                        st.rerun()
+            
+            if thread_key in st.session_state:
+                display_thread(st.session_state[thread_key], f"n{idx}")
             
             st.markdown("---")
 else:
@@ -1353,5 +1766,249 @@ else:
                 if spicy:
                     if st.button(f"📋 Copy Spicy Take", key=f"copy_spicy_{i}", use_container_width=True):
                         st.code(spicy, language=None)
+            
+            st.markdown("")
+
+# ========================================
+# 📊 MY TWEET PERFORMANCE
+# ========================================
+st.markdown("---")
+st.markdown("## 📊 My Tweet Performance")
+st.caption(f"How your recent tweets are performing — @{TYLER_USERNAME}")
+
+if st.button("📊 Load My Tweet Performance", key="load_performance", use_container_width=True):
+    with st.spinner(f"Loading @{TYLER_USERNAME}'s recent tweets..."):
+        user_metrics, my_tweets = get_my_tweet_performance()
+        if user_metrics and my_tweets:
+            st.session_state.my_tweets = my_tweets
+            st.session_state.my_user_metrics = user_metrics
+        elif user_metrics is None:
+            st.error(f"Could not find @{TYLER_USERNAME}. Check the username in config.")
+        else:
+            st.warning("No recent tweets found.")
+
+if 'my_tweets' in st.session_state and st.session_state.my_tweets:
+    my_tweets = st.session_state.my_tweets
+    user_metrics = st.session_state.get('my_user_metrics', {})
+    
+    # Account overview
+    if user_metrics:
+        acct_cols = st.columns(4)
+        acct_cols[0].metric("Followers", f"{user_metrics.get('followers_count', 0):,}")
+        acct_cols[1].metric("Following", f"{user_metrics.get('following_count', 0):,}")
+        acct_cols[2].metric("Total Tweets", f"{user_metrics.get('tweet_count', 0):,}")
+        acct_cols[3].metric("Listed", f"{user_metrics.get('listed_count', 0):,}")
+    
+    # Performance summary
+    avg_engagement = sum(t['total_engagement'] for t in my_tweets) / len(my_tweets) if my_tweets else 0
+    best_tweet = my_tweets[0]  # Already sorted by engagement
+    worst_tweet = my_tweets[-1]
+    
+    perf_cols = st.columns(3)
+    perf_cols[0].metric("Avg Engagement", f"{avg_engagement:.0f}")
+    perf_cols[1].metric("Best Tweet", f"{best_tweet['total_engagement']:,} eng")
+    perf_cols[2].metric("Weakest Tweet", f"{worst_tweet['total_engagement']:,} eng")
+    
+    # Subject analysis
+    subject_eng = defaultdict(lambda: {"count": 0, "total_eng": 0})
+    for t in my_tweets:
+        for s in t['subjects']:
+            subject_eng[s]["count"] += 1
+            subject_eng[s]["total_eng"] += t['total_engagement']
+    
+    if subject_eng:
+        sorted_subjects = sorted(subject_eng.items(), key=lambda x: x[1]['total_eng'], reverse=True)
+        
+        with st.expander("📈 What Topics Hit Hardest?", expanded=True):
+            for subj, data in sorted_subjects[:6]:
+                avg = data['total_eng'] / data['count'] if data['count'] > 0 else 0
+                st.markdown(f'''
+                    <div style="display: flex; justify-content: space-between; align-items: center; background-color: #16181c; border-radius: 8px; padding: 10px 14px; margin-bottom: 6px;">
+                        <div>
+                            <strong style="color: #e7e9ea;">{subj}</strong>
+                            <span style="color: #536471; font-size: 11px; margin-left: 8px;">{data['count']} tweets</span>
+                        </div>
+                        <div style="font-size: 13px;">
+                            <span style="color: #1d9bf0; font-weight: bold;">{avg:.0f} avg eng</span>
+                            <span style="color: #536471; margin-left: 8px;">({data['total_eng']:,} total)</span>
+                        </div>
+                    </div>
+                ''', unsafe_allow_html=True)
+    
+    # Individual tweets ranked
+    with st.expander(f"🏆 Your Top {len(my_tweets)} Recent Tweets (Ranked)", expanded=False):
+        for rank, t in enumerate(my_tweets, 1):
+            # Medal for top 3
+            if rank == 1:
+                rank_icon = "🥇"
+            elif rank == 2:
+                rank_icon = "🥈"
+            elif rank == 3:
+                rank_icon = "🥉"
+            else:
+                rank_icon = f"#{rank}"
+            
+            tweet_url = f"https://twitter.com/{TYLER_USERNAME}/status/{t['id']}"
+            
+            # Engagement color
+            if rank <= 3:
+                eng_color = "#00ba7c"
+            elif rank <= 10:
+                eng_color = "#1d9bf0"
+            else:
+                eng_color = "#f4212e"
+            
+            created = t.get('created_at', '')
+            if created and hasattr(created, 'strftime'):
+                time_str = created.strftime('%b %d, %I:%M %p')
+            else:
+                time_str = str(created)[:16]
+            
+            st.markdown(f'''
+                <div style="background-color: #16181c; border: 1px solid #2f3336; border-radius: 10px; padding: 12px; margin-bottom: 8px;">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                        <div style="flex: 1;">
+                            <span style="font-size: 14px; margin-right: 8px;">{rank_icon}</span>
+                            <span style="font-size: 13px; color: #e7e9ea;">{t["text"][:120]}{"..." if len(t["text"]) > 120 else ""}</span>
+                        </div>
+                        <div style="flex-shrink: 0; margin-left: 12px; text-align: right;">
+                            <div style="font-size: 18px; font-weight: bold; color: {eng_color};">{t["total_engagement"]:,}</div>
+                            <div style="font-size: 10px; color: #536471;">total eng</div>
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 16px; font-size: 12px; color: #71767b; margin-top: 8px;">
+                        <span>💬 {t["replies"]}</span>
+                        <span>🔄 {t["retweets"]}</span>
+                        <span>❤️ {t["likes"]}</span>
+                        <span style="color: #536471;">{time_str}</span>
+                        <a href="{tweet_url}" target="_blank" style="color: #1d9bf0; text-decoration: none;">View →</a>
+                    </div>
+                </div>
+            ''', unsafe_allow_html=True)
+
+# ========================================
+# 🎯 REPLY TARGET FINDER
+# ========================================
+st.markdown("---")
+st.markdown("## 🎯 Reply Target Finder")
+st.caption("Big accounts tweeting about Broncos/Nuggets right now — reply for maximum visibility")
+
+reply_cols = st.columns([3, 1])
+
+with reply_cols[0]:
+    find_targets_btn = st.button("🎯 Find Reply Targets (25K+ followers)", key="find_reply_targets", use_container_width=True, type="primary")
+
+with reply_cols[1]:
+    min_followers_k = st.selectbox("Min followers", [10, 25, 50, 100], index=1, format_func=lambda x: f"{x}K+")
+
+if find_targets_btn:
+    with st.spinner("🔍 Scanning for high-follower accounts tweeting about Denver sports..."):
+        targets = find_reply_targets(min_followers=min_followers_k * 1000)
+        st.session_state.reply_targets = targets
+
+if 'reply_targets' in st.session_state:
+    targets = st.session_state.reply_targets
+    
+    if not targets:
+        st.info("No high-follower accounts found tweeting about Broncos/Nuggets in the last 24 hours. Try lowering the follower minimum.")
+    else:
+        st.success(f"🎯 Found {len(targets)} reply opportunities!")
+        
+        for t_idx, target in enumerate(targets):
+            tweet_url = f"https://twitter.com/{target['author']}/status/{target['id']}"
+            reply_url = f"https://twitter.com/intent/tweet?in_reply_to={target['id']}"
+            
+            # Format follower count
+            followers = target['followers']
+            if followers >= 1_000_000:
+                follower_str = f"{followers/1_000_000:.1f}M"
+            elif followers >= 1000:
+                follower_str = f"{followers/1000:.0f}K"
+            else:
+                follower_str = str(followers)
+            
+            # Opportunity level
+            if t_idx == 0:
+                opp_color = "#f91880"
+                opp_label = "🔥 BEST OPPORTUNITY"
+            elif t_idx <= 2:
+                opp_color = "#ff6b35"
+                opp_label = "⚡ HIGH VALUE"
+            else:
+                opp_color = "#1d9bf0"
+                opp_label = "💡 WORTH A REPLY"
+            
+            verified_badge = " ✅" if target.get('verified') else ""
+            
+            st.markdown(f'''
+                <div style="background-color: #16181c; border: 1px solid {opp_color}; border-radius: 12px; padding: 16px; margin-bottom: 10px;">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+                        <div>
+                            <span style="font-size: 10px; color: {opp_color}; font-weight: bold;">{opp_label}</span><br>
+                            <strong style="color: #e7e9ea; font-size: 15px;">{target['author_name']}{verified_badge}</strong>
+                            <span style="color: #71767b;"> @{target['author']}</span>
+                            <span style="background-color: #2f3336; color: #e7e9ea; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: bold; margin-left: 8px;">👥 {follower_str}</span>
+                        </div>
+                    </div>
+                    <div style="font-size: 14px; color: #e7e9ea; line-height: 1.4; margin-bottom: 10px;">{target['text'][:200]}{"..." if len(target['text']) > 200 else ""}</div>
+                    <div style="display: flex; gap: 16px; font-size: 12px; color: #71767b; margin-bottom: 10px;">
+                        <span>💬 {target['replies']}</span>
+                        <span>🔄 {target['retweets']}</span>
+                        <span>❤️ {target['likes']}</span>
+                    </div>
+                    <div style="display: flex; gap: 10px;">
+                        <a href="{tweet_url}" target="_blank" style="color: #1d9bf0; text-decoration: none; font-size: 13px;">🔗 View Tweet</a>
+                        <a href="{reply_url}" target="_blank" style="background-color: #1d9bf0; color: white; padding: 4px 14px; border-radius: 16px; text-decoration: none; font-size: 13px; font-weight: bold;">💬 Reply Now →</a>
+                    </div>
+                </div>
+            ''', unsafe_allow_html=True)
+            
+            # Generate a quick reply suggestion
+            reply_gen_key = f"reply_suggestion_{t_idx}"
+            if reply_gen_key not in st.session_state:
+                if st.button(f"✨ Generate Reply Suggestion", key=f"gen_reply_sug_{t_idx}", use_container_width=True):
+                    with st.spinner("Crafting your reply..."):
+                        reply_prompt = f'''You are Tyler Polumbus — former Broncos OL (Super Bowl 50), radio host on Altitude 92.5. Write a smart, engaging reply to this tweet from @{target['author']} ({follower_str} followers):
+
+"{target['text']}"
+
+Your reply should:
+- Be under 280 characters
+- Add insider value or a strong opinion
+- Be the kind of reply that makes their followers want to follow YOU
+- Sound natural, not like a bot
+
+Return just the reply text, nothing else.'''
+                        
+                        try:
+                            reply_msg = client.messages.create(
+                                model="claude-sonnet-4-5-20250929",
+                                max_tokens=300,
+                                messages=[{"role": "user", "content": reply_prompt}]
+                            )
+                            st.session_state[reply_gen_key] = reply_msg.content[0].text.strip().strip('"')
+                            st.rerun()
+                        except Exception as e:
+                            st.session_state[reply_gen_key] = f"ERROR: {str(e)}"
+                            st.rerun()
+            
+            if reply_gen_key in st.session_state:
+                suggestion = st.session_state[reply_gen_key]
+                edited_suggestion = st.text_area(
+                    "Reply suggestion",
+                    value=suggestion,
+                    height=70,
+                    key=f"edit_reply_sug_{t_idx}",
+                    label_visibility="collapsed"
+                )
+                
+                sug_col1, sug_col2 = st.columns(2)
+                with sug_col1:
+                    if st.button("📋 Copy Reply", key=f"copy_reply_sug_{t_idx}", use_container_width=True):
+                        st.code(edited_suggestion, language=None)
+                with sug_col2:
+                    # Direct reply intent URL with pre-filled text
+                    intent_url = f"https://twitter.com/intent/tweet?in_reply_to={target['id']}&text={quote_plus(edited_suggestion)}"
+                    st.markdown(f'<a href="{intent_url}" target="_blank" style="display: block; background-color: #1d9bf0; color: white; text-align: center; padding: 8px; border-radius: 20px; text-decoration: none; font-weight: bold;">🚀 Post Reply on 𝕏 →</a>', unsafe_allow_html=True)
             
             st.markdown("")
