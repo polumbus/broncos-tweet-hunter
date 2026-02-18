@@ -374,10 +374,22 @@ def get_top_debate_tweets(exclude_ids=None):
     seen_ids = set()
     all_users = {}
     
+    # Debug counters
+    stats = {
+        'total_raw': 0,
+        'filtered_spam': 0,
+        'filtered_not_original': 0,
+        'filtered_rugby': 0,
+        'filtered_duplicate': 0,
+        'kept': 0
+    }
+    
     # Process all 4 search results
     for tweets_obj in [broncos_normal, broncos_debate, nuggets_normal, nuggets_debate]:
         if not tweets_obj or not tweets_obj.data:
             continue
+        
+        stats['total_raw'] += len(tweets_obj.data)
         
         # Collect users
         if hasattr(tweets_obj, 'includes') and tweets_obj.includes and 'users' in tweets_obj.includes:
@@ -388,24 +400,31 @@ def get_top_debate_tweets(exclude_ids=None):
         for tweet in tweets_obj.data:
             # Skip duplicates
             if tweet.id in seen_ids:
+                stats['filtered_duplicate'] += 1
                 continue
             
             # Skip already shown tweets
             if tweet.id in exclude_ids:
+                stats['filtered_duplicate'] += 1
                 continue
             
             metrics = tweet.public_metrics
             
             # Apply filters
             if is_spam_tweet(tweet, metrics):
+                stats['filtered_spam'] += 1
                 continue
             
             if not is_original_tweet(tweet):
+                stats['filtered_not_original'] += 1
                 continue
             
             # Filter out wrong Broncos team (rugby/Brisbane)
             if is_wrong_broncos_team(tweet):
+                stats['filtered_rugby'] += 1
                 continue
+            
+            stats['kept'] += 1
             
             # Calculate debate score
             score = calculate_debate_score(metrics, tweet.text)
@@ -519,7 +538,7 @@ def get_top_debate_tweets(exclude_ids=None):
                 for subj in tweet['subjects']:
                     subject_count_nuggets[subj] += 1
     
-    return final_broncos, final_nuggets
+    return final_broncos, final_nuggets, stats
 
 def fetch_tweet_media(tweet_id):
     """Fetch media for a specific tweet"""
@@ -650,7 +669,7 @@ Return ONLY valid JSON:
         }
 
 # Button section
-col1, col2, col3 = st.columns([2, 2, 1])
+col1, col2, col3, col4 = st.columns([2, 2, 1.5, 1])
 
 with col1:
     scan_button = st.button("🔍 Scan for Viral Debates", use_container_width=True, type="primary")
@@ -659,7 +678,13 @@ with col2:
     scan_new_button = st.button("🆕 Scan Again (New Tweets Only)", use_container_width=True)
 
 with col3:
-    if st.button("🗑️ Clear History"):
+    if st.button("🔄 Reset Duplicates", use_container_width=True):
+        st.session_state.shown_tweet_ids = set()
+        st.success("✅ Duplicate tracking cleared! Next scan will be fresh.")
+        st.rerun()
+
+with col4:
+    if st.button("🗑️ Clear All", use_container_width=True):
         st.session_state.shown_tweet_ids = set()
         st.session_state.current_broncos_tweets = []
         st.session_state.current_nuggets_tweets = []
@@ -679,11 +704,12 @@ if scan_button or scan_new_button:
     with st.spinner(f"Scanning Twitter for {scan_type}..."):
         
         # Get top tweets with diversity enforcement
-        top_broncos, top_nuggets = get_top_debate_tweets(exclude_ids=exclude_ids)
+        top_broncos, top_nuggets, filter_stats = get_top_debate_tweets(exclude_ids=exclude_ids)
         
         # Store in session state
         st.session_state.current_broncos_tweets = top_broncos
         st.session_state.current_nuggets_tweets = top_nuggets
+        st.session_state.filter_stats = filter_stats  # Store stats for display
         
         # Track newly shown tweets
         for tweet in top_broncos + top_nuggets:
@@ -691,6 +717,23 @@ if scan_button or scan_new_button:
 
 # Display tweets from session state (so they persist across reruns)
 if st.session_state.current_broncos_tweets or st.session_state.current_nuggets_tweets:
+    # Display scan results with debug info
+    if scan_button or scan_new_button:
+        st.success(f"✅ Scan complete! Found {len(top_broncos)} Broncos tweets and {len(top_nuggets)} Nuggets tweets")
+        
+        # Show filter stats if available
+        if 'filter_stats' in st.session_state:
+            stats = st.session_state.filter_stats
+            with st.expander("📊 Debug Info - Why only a few tweets?"):
+                st.write(f"**Raw tweets from API:** {stats['total_raw']}")
+                st.write(f"**Filtered out:**")
+                st.write(f"- Spam: {stats['filtered_spam']}")
+                st.write(f"- Not original: {stats['filtered_not_original']}")
+                st.write(f"- Rugby/Brisbane Broncos: {stats['filtered_rugby']}")
+                st.write(f"- Duplicates: {stats['filtered_duplicate']}")
+                st.write(f"**Kept after filters:** {stats['kept']}")
+                st.write(f"**Final after diversity enforcement:** {len(top_broncos)} Broncos + {len(top_nuggets)} Nuggets")
+    
     top_broncos = st.session_state.current_broncos_tweets
     top_nuggets = st.session_state.current_nuggets_tweets
     
