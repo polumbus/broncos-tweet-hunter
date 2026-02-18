@@ -932,4 +932,4 @@ if st.session_state.current_broncos_tweets or st.session_state.current_nuggets_t
 else:
     # No tweets in session state yet
     if scan_button or scan_new_button:
-        st.warning("⚠️ No viral debates found in the last 36 hours. Try again 
+        st.warning("⚠️ No viral debates found in the last 36 hours. Try again later!")
