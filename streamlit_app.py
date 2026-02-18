@@ -604,52 +604,35 @@ def display_tweet_card(tweet, is_top_pick=False, pick_number=None):
         st.markdown(f'<a href="{tweet_url}" target="_blank" style="color: #1d9bf0; text-decoration: none;">🔗 View on Twitter →</a>', unsafe_allow_html=True)
 
 def generate_rewrites(original_tweet):
-    """Generate all 4 rewrite styles using Claude 3 Haiku with prompt caching"""
+    """Generate all 4 rewrite styles at once using Sonnet"""
     
-    # SYSTEM PROMPT with caching for speed
-    system_prompt = [
-        {
-            "type": "text",
-            "text": "You are Tyler Polumbus, former Denver Broncos player and current radio/podcast host. Rewrite viral tweets in your authentic voice."
-        },
-        {
-            "type": "text",
-            "text": """Generate 4 versions for every tweet:
+    prompt = f'''Rewrite this viral Broncos tweet in 4 different styles for Tyler Polumbus (former Broncos player, radio host):
+
+Original tweet:
+{original_tweet}
+
+Generate 4 versions:
 1. DEFAULT: Clean, informative, sports radio voice
 2. ANALYTICAL: Stats-focused, film breakdown style
 3. CONTROVERSIAL: Spicy hot take that drives engagement
 4. PERSONAL: First-person from Tyler's NFL experience
 
 Return ONLY valid JSON:
-{"Default": "...", "Analytical": "...", "Controversial": "...", "Personal": "..."}""",
-            "cache_control": {"type": "ephemeral"}
-        }
-    ]
-    
-    user_prompt = f"Original tweet:\n{original_tweet}"
+{{"Default": "...", "Analytical": "...", "Controversial": "...", "Personal": "..."}}'''
     
     try:
         message = client.messages.create(
-            model="claude-3-haiku-20240307",  # Claude 3 Haiku - VERIFIED EXISTS
-            max_tokens=800,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_prompt}]
+            model="claude-sonnet-4-5-20250929",  # Back to reliable Sonnet
+            max_tokens=1000,
+            messages=[{"role": "user", "content": prompt}]
         )
         
         response_text = message.content[0].text
-        
-        # Clean markdown if present
-        clean_response = response_text.strip()
-        if clean_response.startswith('```'):
-            clean_response = clean_response.split('\n', 1)[1] if '\n' in clean_response else clean_response[3:]
-        if clean_response.endswith('```'):
-            clean_response = clean_response.rsplit('\n', 1)[0] if '\n' in clean_response else clean_response[:-3]
-        clean_response = clean_response.strip()
+        clean_response = response_text.replace('```json', '').replace('```', '').strip()
         
         import json
         rewrites = json.loads(clean_response)
         return rewrites
-        
     except Exception as e:
         return {
             "Default": f"ERROR: {str(e)}",
@@ -949,4 +932,4 @@ if st.session_state.current_broncos_tweets or st.session_state.current_nuggets_t
 else:
     # No tweets in session state yet
     if scan_button or scan_new_button:
-        st.warning("⚠️ No viral debates found in the last 36 hours. Try again later!")
+        st.warning("⚠️ No viral debates found in the last 36 hours. Try again 
