@@ -595,7 +595,7 @@ def display_tweet_card(tweet, is_top_pick=False, pick_number=None):
         st.markdown(f'<a href="{tweet_url}" target="_blank" style="color: #1d9bf0; text-decoration: none;">🔗 View on Twitter →</a>', unsafe_allow_html=True)
 
 def generate_rewrites(original_tweet):
-    """Generate all 4 rewrite styles using Haiku 3.5 with prompt caching"""
+    """Generate all 4 rewrite styles using Claude 3 Haiku with prompt caching"""
     
     # SYSTEM PROMPT with caching for speed
     system_prompt = [
@@ -621,7 +621,7 @@ Return ONLY valid JSON:
     
     try:
         message = client.messages.create(
-            model="claude-3-5-haiku-20241022",  # Haiku 3.5 (correct model name)
+            model="claude-3-haiku-20240307",  # Claude 3 Haiku - VERIFIED EXISTS
             max_tokens=800,
             system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}]
