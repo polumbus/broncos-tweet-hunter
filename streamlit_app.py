@@ -35,6 +35,13 @@ INSIDER_ACCOUNTS = [
     # Denver sports general
     "AltitudeSR",
 ]
+
+# Tyler's curated Twitter lists — high-signal feeds he monitors for work
+TWITTER_LISTS = [
+    "1182699241329721344",   # List 1
+    "1294328608417177604",   # List 2
+    "2011987998699897046",   # List 3
+]
 # ========================================
 
 st.set_page_config(page_title="Tweet Hunter", layout="wide", initial_sidebar_state="collapsed")
@@ -152,10 +159,10 @@ if 'trending_topics' not in st.session_state:
 
 # Keywords
 BRONCOS_KEYWORDS = [
-    "Broncos",               # Catches casual fans — filtered by is_wrong_broncos_team
-    "Denver Broncos",
+    "Denver Broncos",        # Most specific - prioritize this
     "#Broncos",
     "#BroncosCountry",
+    "Broncos NFL",           # Add NFL context
     "Bo Nix",
     "Surtain",
     "Sean Payton"
@@ -231,24 +238,8 @@ def extract_subjects(tweet_text):
         subjects.add("AJ Brown")
     if any(kw in text_lower for kw in ["contract", "extension", "deal"]):
         subjects.add("Contract")
-    if any(kw in text_lower for kw in ["injury", "injured", "hurt", " ir "]):
+    if any(kw in text_lower for kw in ["injury", "injured", "hurt"]):
         subjects.add("Injury")
-    
-    # OFFSEASON TOPICS (Feb/Mar = peak offseason)
-    if any(kw in text_lower for kw in ["free agent", "free agency", "fa ", "signing", "signed"]):
-        subjects.add("Free Agency")
-    if any(kw in text_lower for kw in ["salary cap", "cap space", "cap hit", "dead money"]):
-        subjects.add("Salary Cap")
-    if any(kw in text_lower for kw in ["combine", "pro day", "workout"]):
-        subjects.add("Combine")
-    if any(kw in text_lower for kw in ["mock draft", "mock", "big board"]):
-        subjects.add("Mock Draft")
-    if any(kw in text_lower for kw in ["scheme", "play calling", "playbook", "system"]):
-        subjects.add("Scheme")
-    if any(kw in text_lower for kw in ["roster cut", "waived", "released", "roster move"]):
-        subjects.add("Roster Moves")
-    if any(kw in text_lower for kw in ["coaching staff", "coordinator", "hire", "fired"]):
-        subjects.add("Coaching Staff")
     
     # Fallback: if no specific subject identified
     if not subjects:
@@ -287,11 +278,11 @@ def calculate_debate_score(metrics, tweet_text):
     # Bonus for controversial language
     controversy_keywords = [
         "fire", "trade", "overrated", "bust", "sucks", "trash", "worst",
-        "choke", "flop", "hot take", "debate", "controversial",
+        "choke", "flop", "out", "hot take", "debate", "controversial",
         "payton out", "nix sucks", "jokic flop", "worst trade", "mistake",
         "regret", "washed", "benched", "russ cooked", "payton system",
         "draft mistake", "playoff miss", "murray inconsistent", "title window",
-        "mpj contract", "no fly zone", "overpaid", "cut him"
+        "mpj contract", "no fly zone"
     ]
     if any(kw in text_lower for kw in controversy_keywords):
         score += 250000  # Huge boost
@@ -333,33 +324,9 @@ def is_wrong_broncos_team(tweet):
     # If tweet mentions "Broncos" but no NFL/Denver context, be suspicious
     if "broncos" in text_lower:
         nfl_context = [
-            # Location / venue
-            "denver", "mile high", "empower field", "colorado",
-            # League / conference
-            "nfl", "super bowl", "afc", "afc west",
-            # Current players
-            "bo nix", "nix", "sean payton", "payton", "surtain", "ps2",
-            "courtland sutton", "sutton", "javonte", "riley moss",
-            "troy franklin", "marvin mims", "greg dulcich", "zach allen",
-            "nik bonitto", "jonathon cooper", "quinn meinerz",
-            # General football terms
-            "football", "quarterback", "qb", "touchdown", "offense", "defense",
-            "defensive", "offensive", "draft", "mock draft", "combine",
-            "free agent", "free agency", "trade", "traded", "trading",
-            "roster", "cap space", "salary cap", "contract", "extension",
-            "signing", "signed", "waived", "released", "cut", "pickup",
-            "coach", "coaching", "coordinator", "staff",
-            "schedule", "game", "season", "preseason", "offseason",
-            "playoff", "playoffs", "wildcard", "divisional",
-            "pick", "round", "selection",
-            # Positions
-            "wr", "rb", "cb", "qb1", "te", "ol", "dl", "lb", "safety",
-            "wide receiver", "running back", "cornerback", "linebacker",
-            "pass rush", "pass rusher", "edge",
-            # Actions / analysis
-            "win", "loss", "record", "score", "stats",
-            "scheme", "play calling", "snap", "target",
-            "injury", "injured", "ir",
+            "denver", "nfl", "super bowl", "afc", "bo nix", 
+            "sean payton", "surtain", "mile high", "empower field",
+            "football", "quarterback", "qb", "touchdown"
         ]
         has_nfl_context = any(kw in text_lower for kw in nfl_context)
         
@@ -434,9 +401,9 @@ def search_viral_tweets(keywords, hours=36, debate_mode=False, sort_order='relev
     if debate_mode:
         controversy = [
             "fire", "trade", "overrated", "bust", "sucks", "trash", "worst",
-            "choke", "flop", "hot take", "debate", "controversial",
+            "choke", "flop", "out", "hot take", "debate", "controversial",
             "payton out", "nix sucks", "jokic flop", "worst trade", "mistake",
-            "regret", "washed", "benched", "russ cooked", "overpaid", "cut him"
+            "regret", "washed", "benched", "russ cooked"
         ]
         debate_part = " OR ".join(controversy)
         query = f"({query}) ({debate_part})"
@@ -461,7 +428,6 @@ def search_viral_tweets(keywords, hours=36, debate_mode=False, sort_order='relev
 
 def search_insider_tweets(accounts, hours=24):
     """Search for tweets FROM high-signal insider accounts"""
-    # Twitter query length limit — use first 10 accounts
     sample = random.sample(accounts, min(10, len(accounts)))
     from_clause = " OR ".join([f"from:{acct}" for acct in sample])
     query = f"({from_clause}) -is:retweet lang:en"
@@ -484,13 +450,56 @@ def search_insider_tweets(accounts, hours=24):
         print(f"Insider search error: {str(e)}")
         return None
 
+def search_list_tweets(list_id, hours=36):
+    """Fetch recent tweets from a Twitter list — high-signal curated feed"""
+    try:
+        tweets = client_twitter.get_list_tweets(
+            id=list_id,
+            max_results=100,
+            tweet_fields=['public_metrics', 'created_at', 'referenced_tweets', 'attachments'],
+            expansions=['author_id', 'attachments.media_keys'],
+            user_fields=['username', 'name'],
+            media_fields=['url', 'preview_image_url', 'type']
+        )
+        
+        # get_list_tweets has no start_time param — filter old tweets manually
+        if tweets and tweets.data:
+            cutoff = datetime.utcnow() - timedelta(hours=hours)
+            filtered_data = []
+            for tweet in tweets.data:
+                if tweet.created_at:
+                    try:
+                        tweet_time = tweet.created_at.replace(tzinfo=None)
+                        if tweet_time >= cutoff:
+                            filtered_data.append(tweet)
+                    except:
+                        filtered_data.append(tweet)
+                else:
+                    filtered_data.append(tweet)
+            
+            if not filtered_data:
+                return None
+            
+            # Return a compatible wrapper (Response namedtuple is immutable)
+            class ListResult:
+                pass
+            result = ListResult()
+            result.data = filtered_data
+            result.includes = tweets.includes if hasattr(tweets, 'includes') else None
+            result.meta = tweets.meta if hasattr(tweets, 'meta') else None
+            return result
+        
+        return tweets
+    except Exception as e:
+        print(f"List search error (list {list_id}): {str(e)}")
+        return None
+
 def get_subject_penalty_from_history():
     """Penalize subjects that dominated previous scans (cross-scan balancing)"""
     try:
         history = []
         if SCAN_HISTORY_FILE.exists():
             all_history = json.loads(SCAN_HISTORY_FILE.read_text())
-            # Look at last 3 scans only
             history = all_history[-3:] if len(all_history) >= 3 else all_history
         
         subject_appearances = defaultdict(int)
@@ -499,13 +508,12 @@ def get_subject_penalty_from_history():
             for subject in topics:
                 subject_appearances[subject] += 1
         
-        # Subjects that appeared in all recent scans get penalized
         penalty = {}
         for subject, count in subject_appearances.items():
             if count >= 3:
-                penalty[subject] = 3  # Heavy penalty — appeared in all 3 recent scans
+                penalty[subject] = 3
             elif count >= 2:
-                penalty[subject] = 1  # Light penalty
+                penalty[subject] = 1
         
         return penalty
     except Exception:
@@ -521,11 +529,12 @@ def get_top_debate_tweets(exclude_ids=None):
     fresh_hours = random.randint(12, 18)
     fresh_start = datetime.utcnow() - timedelta(hours=fresh_hours)
     
-    # Run 7 searches IN PARALLEL
+    # Run 7+ searches IN PARALLEL
     # Core 4: UNCHANGED from baseline (relevancy, full 36h window)
     # Fresh 2: ADDED (recency, recent 12-18h slice)
     # Insider 1: ADDED (beat writers + team accounts)
-    with ThreadPoolExecutor(max_workers=7) as executor:
+    # Lists 3: ADDED (Tyler's curated Twitter lists)
+    with ThreadPoolExecutor(max_workers=10) as executor:
         futures = {
             # --- CORE 4: identical to baseline ---
             'broncos_normal': executor.submit(search_viral_tweets, BRONCOS_KEYWORDS, HOURS_BACK, False),
@@ -538,10 +547,15 @@ def get_top_debate_tweets(exclude_ids=None):
             # --- INSIDER 1: beat writers + team accounts ---
             'insiders': executor.submit(search_insider_tweets, INSIDER_ACCOUNTS, 24),
         }
+        # --- LISTS: Tyler's curated Twitter lists ---
+        for i, list_id in enumerate(TWITTER_LISTS):
+            futures[f'list_{i}'] = executor.submit(search_list_tweets, list_id, HOURS_BACK)
+        
         results = {name: f.result() for name, f in futures.items()}
     
-    # Track which results get relaxed filters (fresh + insider tweets)
+    # Track which results get relaxed filters (fresh + insider + list tweets)
     recency_sources = {'broncos_fresh', 'nuggets_fresh', 'insiders'}
+    recency_sources.update(k for k in results if k.startswith('list_'))
     
     # Get subject penalty from scan history (cross-scan balancing)
     subject_penalty = get_subject_penalty_from_history()
@@ -557,6 +571,7 @@ def get_top_debate_tweets(exclude_ids=None):
         'total_raw_core': 0,
         'total_raw_fresh': 0,
         'total_raw_insider': 0,
+        'total_raw_lists': 0,
         'filtered_spam': 0,
         'filtered_not_original': 0,
         'filtered_rugby': 0,
@@ -567,7 +582,7 @@ def get_top_debate_tweets(exclude_ids=None):
         'subjects_penalized': list(subject_penalty.keys()) if subject_penalty else []
     }
     
-    # Process all 6 search results
+    # Process all search results
     for source_name, tweets_obj in results.items():
         if not tweets_obj or not tweets_obj.data:
             continue
@@ -575,7 +590,9 @@ def get_top_debate_tweets(exclude_ids=None):
         is_recency = source_name in recency_sources
         
         stats['total_raw'] += len(tweets_obj.data)
-        if source_name == 'insiders':
+        if source_name.startswith('list_'):
+            stats['total_raw_lists'] += len(tweets_obj.data)
+        elif source_name == 'insiders':
             stats['total_raw_insider'] += len(tweets_obj.data)
         elif is_recency:
             stats['total_raw_fresh'] += len(tweets_obj.data)
@@ -604,7 +621,7 @@ def get_top_debate_tweets(exclude_ids=None):
             
             metrics = tweet.public_metrics
             
-            # Use relaxed spam thresholds for recency tweets (still building engagement)
+            # Use relaxed spam thresholds for recency tweets
             if is_spam_tweet(tweet, metrics, is_recency=is_recency):
                 stats['filtered_spam'] += 1
                 continue
@@ -623,14 +640,13 @@ def get_top_debate_tweets(exclude_ids=None):
             
             stats['kept'] += 1
             
-            # Calculate debate score
             score = calculate_debate_score(metrics, tweet.text)
             priority_info = determine_priority(tweet.text)
             subjects = extract_subjects(tweet.text)
             
             user = all_users.get(tweet.author_id)
             
-            # Freshness bonus — tweets < 6h old get a score bump to compete with older viral tweets
+            # Freshness bonus
             is_fresh = False
             age_hours = 999
             if tweet.created_at:
@@ -638,10 +654,10 @@ def get_top_debate_tweets(exclude_ids=None):
                     age = datetime.utcnow() - tweet.created_at.replace(tzinfo=None)
                     age_hours = age.total_seconds() / 3600
                     if age_hours < 6:
-                        score += 100000  # Fresh tweet bonus
+                        score += 100000
                         is_fresh = True
                     elif age_hours < 12:
-                        score += 50000   # Moderately fresh bonus
+                        score += 50000
                         is_fresh = True
                 except:
                     pass
@@ -649,14 +665,14 @@ def get_top_debate_tweets(exclude_ids=None):
             if is_fresh:
                 stats['kept_fresh'] += 1
             
-            # Velocity boost — fresh tweets with rising replies are the #1 target
+            # Velocity boost
             if age_hours < 8 and metrics['reply_count'] > 3:
-                score += metrics['reply_count'] * 20000  # Rising debate signal
+                score += metrics['reply_count'] * 20000
             
-            # Cross-scan subject penalty — demote subjects that dominated recent scans
+            # Cross-scan subject penalty
             for subj in subjects:
                 if subj in subject_penalty:
-                    score -= subject_penalty[subj] * 50000  # Gentle demotion
+                    score -= subject_penalty[subj] * 50000
             
             # Attach media
             tweet_media = []
@@ -687,7 +703,7 @@ def get_top_debate_tweets(exclude_ids=None):
     # Sort all tweets by debate score
     all_tweets.sort(key=lambda x: x['debate_score'], reverse=True)
     
-    # DIVERSITY ENFORCEMENT: Max 2 per subject + max 2 per author
+    # DIVERSITY ENFORCEMENT: Max 2 tweets per subject
     broncos_keywords_lower = [k.lower() for k in BRONCOS_KEYWORDS]
     nuggets_keywords_lower = [k.lower() for k in NUGGETS_KEYWORDS]
     
@@ -695,8 +711,6 @@ def get_top_debate_tweets(exclude_ids=None):
     final_nuggets = []
     subject_count_broncos = defaultdict(int)
     subject_count_nuggets = defaultdict(int)
-    author_count_broncos = defaultdict(int)
-    author_count_nuggets = defaultdict(int)
     
     broncos_backup = []
     nuggets_backup = []
@@ -707,72 +721,95 @@ def get_top_debate_tweets(exclude_ids=None):
         is_broncos = any(kw in text_lower for kw in broncos_keywords_lower)
         is_nuggets = any(kw in text_lower for kw in nuggets_keywords_lower)
         
-        # Use PRIMARY subject only (most specific) for diversity cap — not all subjects
-        primary_subject = list(tweet['subjects'])[0] if tweet['subjects'] else "Other"
-        author = tweet['author']
-        
         if is_broncos and len(final_broncos) < 10:
-            # Check subject cap AND author cap
-            if subject_count_broncos[primary_subject] >= 2 or author_count_broncos[author] >= 2:
-                broncos_backup.append(tweet)
-            else:
+            can_add = True
+            for subj in tweet['subjects']:
+                if subject_count_broncos[subj] >= 2:
+                    can_add = False
+                    break
+            
+            if can_add:
                 final_broncos.append(tweet)
-                subject_count_broncos[primary_subject] += 1
-                author_count_broncos[author] += 1
+                for subj in tweet['subjects']:
+                    subject_count_broncos[subj] += 1
+            else:
+                broncos_backup.append(tweet)
         
         elif is_nuggets and len(final_nuggets) < 5:
-            if subject_count_nuggets[primary_subject] >= 2 or author_count_nuggets[author] >= 2:
-                nuggets_backup.append(tweet)
-            else:
+            can_add = True
+            for subj in tweet['subjects']:
+                if subject_count_nuggets[subj] >= 2:
+                    can_add = False
+                    break
+            
+            if can_add:
                 final_nuggets.append(tweet)
-                subject_count_nuggets[primary_subject] += 1
-                author_count_nuggets[author] += 1
+                for subj in tweet['subjects']:
+                    subject_count_nuggets[subj] += 1
+            else:
+                nuggets_backup.append(tweet)
     
-    # FALLBACK: If short, relax to 3 per subject + 3 per author
+    # FALLBACK: If short, relax to 3 max per subject
     if len(final_broncos) < 8 and broncos_backup:
         for tweet in broncos_backup:
             if len(final_broncos) >= 10:
                 break
-            primary_subject = list(tweet['subjects'])[0] if tweet['subjects'] else "Other"
-            author = tweet['author']
-            if subject_count_broncos[primary_subject] < 3 and author_count_broncos[author] < 3:
+            can_add = True
+            for subj in tweet['subjects']:
+                if subject_count_broncos[subj] >= 3:
+                    can_add = False
+                    break
+            if can_add:
                 final_broncos.append(tweet)
-                subject_count_broncos[primary_subject] += 1
-                author_count_broncos[author] += 1
+                for subj in tweet['subjects']:
+                    subject_count_broncos[subj] += 1
     
     if len(final_nuggets) < 4 and nuggets_backup:
         for tweet in nuggets_backup:
             if len(final_nuggets) >= 5:
                 break
-            primary_subject = list(tweet['subjects'])[0] if tweet['subjects'] else "Other"
-            author = tweet['author']
-            if subject_count_nuggets[primary_subject] < 3 and author_count_nuggets[author] < 3:
+            can_add = True
+            for subj in tweet['subjects']:
+                if subject_count_nuggets[subj] >= 3:
+                    can_add = False
+                    break
+            if can_add:
                 final_nuggets.append(tweet)
-                subject_count_nuggets[primary_subject] += 1
-                author_count_nuggets[author] += 1
+                for subj in tweet['subjects']:
+                    subject_count_nuggets[subj] += 1
     
-    # VOLUME FALLBACK: Relax to 5 per subject, ignore author cap
+    # VOLUME FALLBACK: relax to 5 per subject
     if len(final_broncos) < 6 and broncos_backup:
         for tweet in broncos_backup:
             if len(final_broncos) >= 10:
                 break
             if tweet not in final_broncos:
-                primary_subject = list(tweet['subjects'])[0] if tweet['subjects'] else "Other"
-                if subject_count_broncos[primary_subject] < 5:
+                can_add = True
+                for subj in tweet['subjects']:
+                    if subject_count_broncos[subj] >= 5:
+                        can_add = False
+                        break
+                if can_add:
                     final_broncos.append(tweet)
-                    subject_count_broncos[primary_subject] += 1
+                    for subj in tweet['subjects']:
+                        subject_count_broncos[subj] += 1
     
     if len(final_nuggets) < 3 and nuggets_backup:
         for tweet in nuggets_backup:
             if len(final_nuggets) >= 5:
                 break
             if tweet not in final_nuggets:
-                primary_subject = list(tweet['subjects'])[0] if tweet['subjects'] else "Other"
-                if subject_count_nuggets[primary_subject] < 5:
+                can_add = True
+                for subj in tweet['subjects']:
+                    if subject_count_nuggets[subj] >= 5:
+                        can_add = False
+                        break
+                if can_add:
                     final_nuggets.append(tweet)
-                    subject_count_nuggets[primary_subject] += 1
+                    for subj in tweet['subjects']:
+                        subject_count_nuggets[subj] += 1
     
-    # LAST RESORT: If still under 6 Broncos, do one extra relevancy search
+    # LAST RESORT: extra API call if still under 6 Broncos
     if len(final_broncos) < 6:
         try:
             extra = search_viral_tweets(BRONCOS_KEYWORDS, HOURS_BACK, True)
@@ -1296,14 +1333,6 @@ SUBJECT_SEARCH_QUERIES = {
     "AJ Brown": "AJ Brown Broncos",
     "Contract": "Broncos contract OR Nuggets contract",
     "Injury": "Broncos injury OR Nuggets injury",
-    # Offseason
-    "Free Agency": "Broncos free agent OR Broncos signing OR Broncos free agency",
-    "Salary Cap": "Broncos cap space OR Broncos salary cap",
-    "Combine": "Broncos combine OR NFL combine Broncos",
-    "Mock Draft": "Broncos mock draft",
-    "Scheme": "Broncos scheme OR Broncos play calling",
-    "Roster Moves": "Broncos waived OR Broncos released OR Broncos roster",
-    "Coaching Staff": "Broncos coaching staff OR Broncos coordinator",
 }
 
 def get_twitter_search_url(subject):
@@ -1500,7 +1529,7 @@ if st.session_state.current_broncos_tweets or st.session_state.current_nuggets_t
         if 'filter_stats' in st.session_state:
             stats = st.session_state.filter_stats
             with st.expander("📊 Scan Info — Search Breakdown + Filters"):
-                st.write(f"**Raw tweets from API:** {stats['total_raw']} (core: {stats.get('total_raw_core', '?')} | fresh: {stats.get('total_raw_fresh', '?')} | insider: {stats.get('total_raw_insider', '?')})")
+                st.write(f"**Raw tweets from API:** {stats['total_raw']} (core: {stats.get('total_raw_core', '?')} | fresh: {stats.get('total_raw_fresh', '?')} | insider: {stats.get('total_raw_insider', '?')} | lists: {stats.get('total_raw_lists', '?')})")
                 st.write(f"**Fresh recency window:** last {stats.get('fresh_window', '?')}")
                 if stats.get('subjects_penalized'):
                     st.write(f"**Subjects penalized (overexposed):** {', '.join(stats['subjects_penalized'])}")
@@ -2117,7 +2146,7 @@ st.markdown("---")
 st.markdown("## 🎯 Reply Target Finder")
 st.caption("Big accounts tweeting about Broncos/Nuggets right now — reply for maximum visibility")
 
-reply_cols = st.columns([3, 1, 1])
+reply_cols = st.columns([3, 1])
 
 with reply_cols[0]:
     find_targets_btn = st.button("🎯 Find Reply Targets (25K+ followers)", key="find_reply_targets", use_container_width=True, type="primary")
@@ -2125,19 +2154,9 @@ with reply_cols[0]:
 with reply_cols[1]:
     min_followers_k = st.selectbox("Min followers", [10, 25, 50, 100], index=1, format_func=lambda x: f"{x}K+")
 
-with reply_cols[2]:
-    refresh_targets_btn = st.button("🔄 Refresh", key="refresh_reply_targets", use_container_width=True)
-
-if find_targets_btn or refresh_targets_btn:
+if find_targets_btn:
     with st.spinner("🔍 Scanning for high-follower accounts tweeting about Denver sports..."):
-        # On refresh, exclude previously shown targets
-        exclude_target_ids = set()
-        if refresh_targets_btn and 'reply_targets' in st.session_state:
-            exclude_target_ids = {t['id'] for t in st.session_state.reply_targets}
         targets = find_reply_targets(min_followers=min_followers_k * 1000)
-        # Filter out previously shown targets on refresh
-        if exclude_target_ids:
-            targets = [t for t in targets if t['id'] not in exclude_target_ids]
         st.session_state.reply_targets = targets
 
 if 'reply_targets' in st.session_state:
